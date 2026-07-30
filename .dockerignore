@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+README.md
+venv/
+.venv/
+chroma_db/
+logs/
+*.log
+docker/
+.dockerignore

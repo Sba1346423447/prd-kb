@@ -1,0 +1,45 @@
+# 企业技术支持智研知识库（PRD-KB）配置文件
+# ====================================
+# LLM 配置（兼容 OpenAI 协议，支持豆包、通义千问、DeepSeek、OpenAI 等）
+llm:
+  api_key: "your-api-key-here"                         # 替换为你的 API Key
+  base_url: "https://api.example.com/v1"               # 替换为你的 API 端点
+  model_name: "your-model-name"                        # 替换为你的模型名称
+  temperature: 0
+
+# 嵌入模型配置（BGE 中文系列）
+embedding:
+  model_path: "/path/to/models/bge-small-zh-v1.5"      # 本地模型路径，Docker 部署时通过环境变量覆盖
+  device: "cpu"                                         # cpu / cuda
+  normalize_embeddings: True
+
+# 向量库配置
+vector_store:
+  persist_directory: "./chroma_db"                      # 本地持久化路径，Docker 部署时通过环境变量覆盖
+  collection_name: "rag_docs"
+
+# 分块配置（per_type 可按文件后缀覆盖默认参数）
+chunk:
+  chunk_size: 500
+  chunk_overlap: 60
+  separators: ["\n\n", "\n", "。", "？", "！", "，", "；", "、", "：", "）", "】", "》", "」", " ", ".", "?", "!", ",", ";", ":", ")", "]", "}", ""]
+  per_type:
+    xlsx:
+      chunk_size: 300
+      chunk_overlap: 40
+    md:
+      chunk_size: 600
+      chunk_overlap: 80
+    txt:
+      chunk_size: 600
+      chunk_overlap: 80
+
+# 检索配置
+retrieval:
+  vector_top_k: 8
+  bm25_top_k: 8
+  rrf_k: 60
+  enable_rerank: true
+  rerank_model_path: "/path/to/models/bge-reranker-v2-m3"  # Reranker 模型路径，Docker 部署时通过环境变量覆盖
+  rerank_top_n: 3
+  device: "cpu"

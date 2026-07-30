@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prd_kb"
+version = "1.0.0"
+description = "企业技术支持智研知识库（PRD-KB）—— 基于 LangGraph + Chroma 的私有化研发技术支持智能问答系统"
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = {text = "MIT"}
+authors = [
+    {name = "Sba123_"}
+]
+keywords = ["rag", "langchain", "langgraph", "chromadb", "knowledge-base", "agent"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "langchain-core==1.4.8",
+    "langchain-community==0.4.2",
+    "langchain-text-splitters==1.1.2",
+    "langchain-openai==1.3.3",
+    "langchain-huggingface==1.2.2",
+    "langchain-chroma==1.1.0",
+    "langgraph>=0.2.0",
+    "sentence-transformers==2.7.0",
+    "transformers>=4.40.0",
+    "torch>=2.0.0",
+    "chromadb==1.5.9",
+    "pypdf==6.13.2",
+    "python-docx==1.2.0",
+    "openpyxl>=3.1.0",
+    "fastapi==0.115.0",
+    "uvicorn==0.30.0",
+    "pydantic>=2.0.0",
+    "PyYAML==6.0.3",
+]
+
+[tool.setuptools.packages.find]
+include = ["api*", "core*", "prompts*", "utils*", "config*"]

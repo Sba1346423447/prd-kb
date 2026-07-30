@@ -1,0 +1,52 @@
+# ========== Python ==========
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# ========== 虚拟环境 ==========
+venv/
+.venv/
+env/
+
+# ========== 向量数据库持久化目录 ==========
+chroma_db/
+
+# ========== 知识库文档（用户数据，不提交） ==========
+docs/
+
+# ========== 日志文件 ==========
+logs/
+utils/logs/
+*.log
+
+# ========== 配置文件（含密钥，提交模板即可） ==========
+config/settings.yaml
+!config/settings.example.yaml
+.env
+.env.*
+
+# ========== IDE / 编辑器 ==========
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ========== 系统文件 ==========
+.DS_Store
+Thumbs.db
+
+# ========== 类型检查 / 测试缓存 ==========
+.pyright/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ========== Docker 忽略 ==========
+# .dockerignore 已单独维护，此处忽略无需提交的本地卷数据

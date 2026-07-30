@@ -1,0 +1,19 @@
+version: "3.8"
+
+services:
+  rag:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: rag_knowledge_base
+    ports:
+      - "8000:8000"
+    volumes:
+      - D:/Langchain/models/bge-small-zh-v1.5:/app/models/bge-small-zh-v1.5
+      - D:/models/BAAI/bge-reranker-v2-m3:/app/models/bge-reranker-v2-m3
+      - ../chroma_db:/app/chroma_db
+    environment:
+      - EMBEDDING_MODEL_PATH=/app/models/bge-small-zh-v1.5
+      - RERANK_MODEL_PATH=/app/models/bge-reranker-v2-m3
+      - CHROMA_PERSIST_DIR=/app/chroma_db
+    restart: unless-stopped
