@@ -3,6 +3,7 @@
 
 编排文档加载、清洗、分块、向量化入库全流程，启动时自动扫描目标目录并构建向量知识库。
 """
+import re
 from pathlib import Path
 from langchain_core.documents import Document
 from utils.logger import logger
@@ -11,6 +12,24 @@ from core.document_clean import clean_raw_text
 from core.strategy.chunk_strategy import get_document_splitter
 from core.embedding import load_bge_model
 from core.vector_store import ChromaDBHelper
+
+
+def _make_chunk_id(file_name: str, idx: int) -> str:
+    """生成符合 Chroma ID 规范的 chunk 标识
+
+    清洗文件名中的特殊字符（空格、中文、标点等替换为下划线），
+    避免非法字符导致 Chroma 入库校验失败。
+
+    Args:
+        file_name: 原始文件名（含后缀）
+        idx: chunk 序号
+
+    Returns:
+        合法的 Chroma 文档 ID
+    """
+    safe_name = re.sub(r"[^0-9a-zA-Z_-]", "_", file_name)
+    safe_name = safe_name[:80] or "doc"
+    return f"{safe_name}_chunk_{idx}"
 
 
 def init_knowledge_base(config: dict, dir_path: str):
@@ -91,7 +110,7 @@ def init_knowledge_base(config: dict, dir_path: str):
                 chunk_texts.append(chunk_doc.page_content)
                 chunk_metadatas.append(chunk_doc.metadata)
 
-            chunk_ids = [f"{file_name}_chunk_{idx}" for idx in range(len(chunk_docs))]
+            chunk_ids = [_make_chunk_id(file_name, idx) for idx in range(len(chunk_docs))]
             chroma_helper.add_texts(chunk_texts, chunk_metadatas, chunk_ids)
             logger.info(f"{fp} 分块入库完成，生成 {len(chunk_texts)} 个文本块")
         except Exception as e:

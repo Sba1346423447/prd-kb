@@ -4,10 +4,11 @@
 提供健康检查、同步对话与流式对话三个接口，统一使用 Agent 自主检索模式。
 """
 import json
-from typing import Any
+import uuid
+from typing import Any, List
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage
 from api.schemas import ChatRequest, ChatResponse, HealthResponse
 from api.dependencies import get_app_state, AppState
 from utils.logger import logger
@@ -19,6 +20,24 @@ TOOL_LABEL_MAP = {
     "log_analysis": "分析日志",
     "count_text_characters": "统计字数",
 }
+
+
+def _build_history_messages(history: List[tuple]) -> List[Any]:
+    """将持久化的对话历史转换为 LangChain 消息列表
+
+    Args:
+        history: (role, content) 元组列表，role 为 human 或 ai
+
+    Returns:
+        按时间顺序排列的 LangChain 消息列表
+    """
+    messages = []
+    for role, content in history:
+        if role == "human":
+            messages.append(HumanMessage(content=content))
+        elif role == "ai":
+            messages.append(AIMessage(content=content))
+    return messages
 
 
 @router.get("/health", response_model=HealthResponse)
@@ -36,6 +55,7 @@ async def chat(req: ChatRequest, state: AppState = Depends(get_app_state)):
     """同步对话接口：Agent 自主检索模式
 
     使用 Agent 图处理用户问题，Agent 自主判断是否需要调用检索工具。
+    每次请求从持久化历史重建对话上下文，问答完成后写入会话历史。
     """
     if not state.ready:
         return ChatResponse(
@@ -43,14 +63,19 @@ async def chat(req: ChatRequest, state: AppState = Depends(get_app_state)):
             session_id=req.session_id
         )
 
-    session_config: Any = {"configurable": {"thread_id": req.session_id}}
+    # 每次请求使用独立线程，从 SQLite 历史重建上下文，避免 checkpoint 累积与并发竞态
+    history_messages = _build_history_messages(state.session_store.load_history(req.session_id))
+    history_messages.append(HumanMessage(content=req.question))
+    session_config: Any = {"configurable": {"thread_id": f"{req.session_id}_{uuid.uuid4().hex}"}}
 
     try:
         resp = state.agent_graph.invoke(
-            {"messages": [HumanMessage(content=req.question)]},
+            {"messages": history_messages},
             config=session_config
         )
         answer = resp["messages"][-1].content
+        state.session_store.save_message(req.session_id, "human", req.question)
+        state.session_store.save_message(req.session_id, "ai", answer)
         logger.info(f"会话 [{req.session_id}] 问答完成")
         return ChatResponse(answer=answer, session_id=req.session_id)
     except Exception as e:
@@ -66,29 +91,28 @@ async def chat_stream(req: ChatRequest, state: AppState = Depends(get_app_state)
     """流式对话接口：SSE 逐 token 推送，Agent 自主检索模式
 
     通过 astream_events 监听 LangGraph 执行事件，向前端推送工具调用过程与生成内容。
+    每次请求从持久化历史重建对话上下文，问答完成后写入会话历史。
     """
     if not state.ready:
         async def error_gen():
             yield f"data: {json.dumps({'token': '服务正在初始化中，请稍后重试'})}\n\n"
         return StreamingResponse(error_gen(), media_type="text/event-stream")
 
-    session_config: Any = {"configurable": {"thread_id": req.session_id}}
+    history_messages = _build_history_messages(state.session_store.load_history(req.session_id))
+    history_messages.append(HumanMessage(content=req.question))
+    session_config: Any = {"configurable": {"thread_id": f"{req.session_id}_{uuid.uuid4().hex}"}}
     logger.info(f"流式会话 [{req.session_id}] 开始")
 
     async def event_generator():
         thinking_done = False
         try:
             async for event in state.agent_graph.astream_events(
-                {"messages": [HumanMessage(content=req.question)]},
+                {"messages": history_messages},
                 config=session_config,
                 version="v2"
             ):
                 kind = event["event"]
-                if kind == "on_chain_start" and event["name"] == "retrieve":
-                    yield f"data: {json.dumps({'thinking': {'text': '正在检索知识库...'}})}\n\n"
-                elif kind == "on_chain_end" and event["name"] == "retrieve":
-                    yield f"data: {json.dumps({'thinking': {'text': '检索完成，正在生成回答...'}})}\n\n"
-                elif kind == "on_tool_start":
+                if kind == "on_tool_start":
                     name = event["name"]
                     label = TOOL_LABEL_MAP.get(name, name)
                     yield f"data: {json.dumps({'thinking': {'text': f'正在{label}...'}})}\n\n"
@@ -103,6 +127,12 @@ async def chat_stream(req: ChatRequest, state: AppState = Depends(get_app_state)
                             thinking_done = True
                             yield f"data: {json.dumps({'thinking': {'done': True}})}\n\n"
                         yield f"data: {json.dumps({'token': chunk.content})}\n\n"
+
+            snapshot = state.agent_graph.get_state(session_config)
+            answer = snapshot.values["messages"][-1].content
+            state.session_store.save_message(req.session_id, "human", req.question)
+            state.session_store.save_message(req.session_id, "ai", answer)
+
             yield f"data: {json.dumps({'done': True})}\n\n"
         except Exception as e:
             logger.error(f"流式会话 [{req.session_id}] 异常: {str(e)}")

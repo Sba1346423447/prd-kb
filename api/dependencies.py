@@ -6,6 +6,7 @@
 """
 from typing import Any, Dict, Optional
 from langchain_core.retrievers import BaseRetriever
+from core.session_store import SessionStore
 from utils.logger import logger
 
 
@@ -22,6 +23,7 @@ class AppState:
         self.reranker: Any = None
         self.agent_graph: Any = None
         self.retrieval_config: Optional[Dict[str, Any]] = None
+        self.session_store: Optional[SessionStore] = None
         self.ready = False
 
     def init(self, llm, retriever, retrieval_config, reranker, agent_graph):
@@ -39,6 +41,7 @@ class AppState:
         self.retrieval_config = retrieval_config
         self.reranker = reranker
         self.agent_graph = agent_graph
+        self.session_store = SessionStore()
         self.ready = True
         logger.info("AppState 全局资源初始化完成")
 

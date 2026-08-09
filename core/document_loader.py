@@ -6,10 +6,9 @@
 import os
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from docx import Document as DocxDocument
-from langchain_core.documents import Document
 from utils.logger import logger
 from utils.exceptions import DocumentLoadError
-from core.strategy.chunk_strategy import get_document_splitter, DynamicChunkStrategy
+from core.strategy.chunk_strategy import get_document_splitter
 
 def load_pdf(file_path: str) -> str:
     """加载 PDF 文件并提取纯文本内容"""
@@ -22,12 +21,27 @@ def load_pdf(file_path: str) -> str:
     except Exception as e:
         raise DocumentLoadError(f"PDF加载失败：{str(e)}")
 
-def load_txt(file_path: str) -> str:
-    """加载 TXT 纯文本文件"""
+def _load_text_with_fallback(file_path: str) -> str:
+    """加载文本文件内容，utf-8 编码解析失败时自动回退 GBK
+
+    Args:
+        file_path: 文本文件路径
+
+    Returns:
+        文件文本内容
+    """
     try:
         loader = TextLoader(file_path, encoding="utf-8")
         documents = loader.load()
-        text = "\n".join([doc.page_content for doc in documents])
+    except UnicodeDecodeError:
+        loader = TextLoader(file_path, encoding="gbk")
+        documents = loader.load()
+    return "\n".join([doc.page_content for doc in documents])
+
+def load_txt(file_path: str) -> str:
+    """加载 TXT 纯文本文件（utf-8 优先，失败回退 GBK）"""
+    try:
+        text = _load_text_with_fallback(file_path)
         logger.info(f"成功加载TXT文件：{file_path}")
         return text
     except Exception as e:
@@ -51,11 +65,9 @@ def load_docx(file_path: str) -> str:
         raise DocumentLoadError(f"Word加载失败：{str(e)}")
 
 def load_md(file_path: str) -> str:
-    """加载 Markdown 文档提取纯文本内容"""
+    """加载 Markdown 文档提取纯文本内容（utf-8 优先，失败回退 GBK）"""
     try:
-        loader = TextLoader(file_path, encoding="utf-8")
-        documents = loader.load()
-        text = "\n".join([doc.page_content for doc in documents])
+        text = _load_text_with_fallback(file_path)
         logger.info(f"成功加载Markdown文件：{file_path}")
         return text
     except Exception as e:
@@ -110,36 +122,6 @@ def load_document(file_path: str) -> str:
         return load_xlsx(file_path)
     else:
         raise DocumentLoadError(f"不支持的文件格式：{ext}，仅支持 .pdf/.txt/.docx/.md/.xlsx")
-
-def load_document_as_docs(file_path: str) -> list[Document]:
-    """加载文档并返回 LangChain Document 对象列表
-
-    自动完成加载、元数据标记、动态分块策略选择与分块处理。
-
-    Args:
-        file_path: 文档文件路径
-
-    Returns:
-        分块后的 LangChain Document 对象列表
-    """
-    text = load_document(file_path)
-    file_name = os.path.basename(file_path)
-    ext = os.path.splitext(file_path)[1].lower()
-
-    meta = {
-        "file_path": file_path,
-        "file_name": file_name,
-        "file_ext": ext,
-        "is_table": ext == ".xlsx"
-    }
-
-    dynamic_strategy = DynamicChunkStrategy()
-    content_length = len(text)
-    chunk_params = dynamic_strategy.get_optimal_params(ext, content_length)
-
-    splitter = get_document_splitter(ext, chunk_params)
-    docs = splitter.split([Document(page_content=text, metadata=meta)])
-    return docs
 
 def scan_directory_files(dir_path: str, support_exts: list[str]) -> list[str]:
     """遍历目录，筛选所有支持后缀的文档路径
