@@ -114,36 +114,6 @@ class DefaultRecursiveChunkStrategy(BaseChunkStrategy):
             chunk.metadata.update(file_meta or {})
         return self._filter_small_chunk(chunks)
 
-class DynamicChunkStrategy:
-    """动态分块策略选择器
-
-    根据文档类型和内容长度自动选择最优分块参数，长文档自动增大 chunk_size。
-    """
-    def __init__(self):
-        self.chunk_params = {
-            'pdf': {'size': 500, 'overlap': 50, 'strategy': 'recursive'},
-            'xlsx': {'size': 300, 'overlap': 30, 'strategy': 'table'},
-            'docx': {'size': 400, 'overlap': 40, 'strategy': 'recursive'},
-            'md': {'size': 600, 'overlap': 60, 'strategy': 'hybrid'},
-            'txt': {'size': 600, 'overlap': 60, 'strategy': 'paragraph'}
-        }
-
-    def get_optimal_params(self, doc_type: str, content_length: int):
-        """根据文档类型和内容长度返回最优分块参数
-
-        Args:
-            doc_type: 文档类型后缀，如 'pdf'、'md'
-            content_length: 文档文本总长度
-
-        Returns:
-            包含 size、overlap、strategy 的分块参数字典
-        """
-        base = self.chunk_params.get(doc_type.lower(), self.chunk_params['pdf'])
-        if content_length > 10000:
-            base['size'] = int(base['size'] * 1.5)
-            base['overlap'] = int(base['overlap'] * 1.2)
-        return base
-
 def get_document_splitter(file_ext: str, chunk_config: Dict[str, Any]) -> BaseChunkStrategy:
     """分块策略工厂方法，根据文件后缀返回对应策略实例
 

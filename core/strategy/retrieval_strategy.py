@@ -113,67 +113,6 @@ class SemanticRetrievalStrategy(BaseRetrievalStrategy):
         final_top_k = top_k or self.vector_top_k
         return self.vector_retriever.invoke(query)[:final_top_k]
 
-class MultiLevelRetrieval:
-    """多级检索架构
-
-    根据文档类型（PDF/DOCX/XLSX/TXT/MD）自动选择最优检索策略。
-    """
-    def __init__(self):
-        self.vector_retriever: Optional[BaseRetriever] = None
-        self.bm25_retriever: Optional[BM25Retriever] = None
-        self.hybrid_strategy: Optional[HybridRetrievalStrategy] = None
-        self.table_strategy: Optional[TableAwareRetrievalStrategy] = None
-        self.semantic_strategy: Optional[SemanticRetrievalStrategy] = None
-
-    def setup_retrievers(self, chroma_helper, retrieval_config: Dict[str, Any]):
-        """初始化向量检索器与 BM25 检索器，构建三种检索策略实例"""
-        vector_top_k = retrieval_config.get("vector_top_k", 8)
-        self.vector_retriever = chroma_helper.get_retriever(search_kwargs={"k": vector_top_k})
-
-        all_data = chroma_helper.db.get()
-        doc_list = []
-        if all_data and all_data.get("documents"):
-            doc_list = [
-                Document(page_content=doc, metadata=meta)
-                for doc, meta in zip(all_data["documents"], all_data["metadatas"])
-            ]
-        self.bm25_retriever = BM25Retriever.from_documents(doc_list)
-        self.bm25_retriever.k = retrieval_config.get("bm25_top_k", 8)
-
-        assert self.vector_retriever is not None
-        assert self.bm25_retriever is not None
-        self.hybrid_strategy = HybridRetrievalStrategy(
-            vector_retriever=self.vector_retriever,
-            bm25_retriever=self.bm25_retriever,
-            retrieval_config=retrieval_config
-        )
-        self.table_strategy = TableAwareRetrievalStrategy(
-            vector_retriever=self.vector_retriever,
-            bm25_retriever=self.bm25_retriever,
-            retrieval_config=retrieval_config
-        )
-        self.semantic_strategy = SemanticRetrievalStrategy(
-            vector_retriever=self.vector_retriever,
-            retrieval_config=retrieval_config
-        )
-
-    def retrieve(self, query: str, doc_type: str, top_k: Optional[int] = None) -> List[Document]:
-        """根据文档类型选择最优检索策略
-
-        - PDF/DOCX：混合检索（向量 + 关键词增强）
-        - XLSX：表格感知检索（表格优先）
-        - 其他：语义优先检索
-        """
-        if doc_type in ['pdf', 'docx']:
-            assert self.hybrid_strategy is not None
-            return self.hybrid_strategy.retrieve(query, top_k)
-        elif doc_type == 'xlsx':
-            assert self.table_strategy is not None
-            return self.table_strategy.retrieve(query, top_k)
-        else:
-            assert self.semantic_strategy is not None
-            return self.semantic_strategy.retrieve(query, top_k)
-
 def build_advanced_retriever(chroma_helper, retrieval_config: Dict[str, Any]) -> BaseRetriever:
     """构建增强混合检索器（统一对外入口）
 

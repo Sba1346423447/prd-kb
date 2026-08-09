@@ -39,13 +39,28 @@ def build_agent_graph(llm, tools: list):
         llm_with_bind_tools = llm.bind_tools(tools)
         tool_mapping = {tool.name: tool for tool in tools}
 
+        def _extract_question(state: AgentState) -> str:
+            """从消息历史中提取用户最新提问，排除工具调用产生的强制回答提示
+
+            Args:
+                state: Agent 当前状态
+
+            Returns:
+                最近一条真实用户提问文本，找不到则返回空字符串
+            """
+            for msg in reversed(state["messages"]):
+                if isinstance(msg, HumanMessage) and not msg.content.startswith("检索次数已达上限"):
+                    return msg.content
+            return ""
+
         def agent_node(state: AgentState):
             """Agent 决策节点：LLM 思考，输出回答或工具调用指令
 
             检索次数达上限时，不绑定工具，强制 LLM 生成纯文本回答。
             """
             input_messages = state["messages"]
-            formatted_prompt = prompt.invoke({"chat_history": input_messages[:-1], "question": input_messages[-1].content})
+            question = _extract_question(state)
+            formatted_prompt = prompt.invoke({"chat_history": input_messages[:-1], "question": question})
             if state.get("retrieval_count", 0) >= MAX_RETRIEVAL_COUNT:
                 response = llm.invoke(formatted_prompt)
             else:
