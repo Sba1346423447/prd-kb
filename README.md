@@ -11,7 +11,7 @@
 - **表格感知优化**：Excel 文档在分块、检索、重排全链路有特殊标记与加权
 - **多格式文档支持**：PDF / TXT / DOCX / Markdown / XLSX
 - **智能分块策略**：按文件类型自动选择最优分块方案（Markdown 标题层级、Excel 表格、TXT 段落优先、通用递归）
-- **会话记忆**：基于 LangGraph MemorySaver，通过 thread_id 隔离多轮对话上下文
+- **会话记忆**：SQLite 业务表持久化对话历史，服务重启后自动重建上下文，历史记录可查询审计
 - **SSE 流式输出**：逐 token 推送回答 + 工具调用过程实时展示
 - **Web 前端**：类 ChatGPT 单页 UI，支持会话管理、Markdown 渲染、思考过程可视化
 - **Docker 部署**：一键容器化启动，环境变量自动覆盖本地路径
@@ -38,7 +38,7 @@
 ## 项目结构
 
 ```
-rag_project/
+prd-kb/
 ├── main.py                     # 命令行交互入口
 ├── run_api.py                  # FastAPI 服务启动入口
 ├── config/
@@ -57,6 +57,7 @@ rag_project/
 │   ├── vector_store.py         # ChromaDB 封装
 │   ├── llm_client.py           # LLM 客户端初始化
 │   ├── agent_chain.py          # ReAct Agent LangGraph 链路
+│   ├── session_store.py        # 会话历史 SQLite 持久化
 │   ├── tools.py                # Agent 工具集
 │   └── strategy/               # 策略层（策略模式）
 │       ├── base_strategy.py
@@ -64,8 +65,7 @@ rag_project/
 │       ├── retrieval_strategy.py    # 检索策略（混合检索+RRF+上下文扩展）
 │       └── rerank_strategy.py       # 重排序策略
 ├── prompts/                    # 提示词模板
-│   ├── agent_prompt.py
-│   └── rag_prompt.py
+│   └── agent_prompt.py
 ├── utils/
 │   ├── logger.py               # 统一日志（控制台 + 滚动文件）
 │   └── exceptions.py           # 自定义分层异常
@@ -95,8 +95,8 @@ rag_project/
 ### 1. 克隆项目
 
 ```bash
-git clone https://gitcode.com/Sba123_/rag_knowledge_system.git
-cd rag_knowledge_system
+git clone https://gitcode.com/Sba123_/prd-kb.git
+cd prd-kb
 ```
 
 ### 2. 安装依赖
