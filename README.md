@@ -9,8 +9,9 @@
 - **Agent 自主决策**：LLM 借助 Function Calling 自主判断是否需要检索知识库，智能适配专业问答、日志排障、日常闲聊等不同场景
 - **多路混合检索**：向量语义检索 + BM25 关键词检索 → RRF 倒数排名融合 → BGE Reranker 精排 → 相邻 chunk 上下文扩展
 - **表格感知优化**：Excel 文档在分块、检索、重排全链路有特殊标记与加权
-- **多格式文档支持**：PDF / TXT / DOCX / Markdown / XLSX
-- **智能分块策略**：按文件类型自动选择最优分块方案（Markdown 标题层级、Excel 表格、TXT 段落优先、通用递归）
+- **多格式文档支持**：PDF / TXT / DOCX / Markdown / XLSX / 图片（PNG/JPG/WebP/BMP）
+- **智能分块策略**：按文件类型自动选择最优分块方案（Markdown 标题层级、Excel 表格、TXT 段落优先、图片整块、通用递归）
+- **多模态输入**：支持图片问答、图片文档入库与检索回显，视觉模型可插拔配置
 - **会话记忆**：SQLite 业务表持久化对话历史，服务重启后自动重建上下文，历史记录可查询审计
 - **SSE 流式输出**：逐 token 推送回答 + 工具调用过程实时展示
 - **Web 前端**：类 ChatGPT 单页 UI，支持会话管理、Markdown 渲染、思考过程可视化
@@ -25,6 +26,7 @@
 | 语言 | Python 3.10+ |
 | LLM 框架 | LangChain 1.x, LangGraph |
 | 向量数据库 | ChromaDB |
+| 会话存储 | SQLite（对话历史持久化） |
 | 嵌入模型 | BGE-small-zh-v1.5 |
 | 重排序模型 | BGE-reranker-v2-m3 (BAAI) |
 | LLM | OpenAI 协议兼容（豆包 / 通义千问 / DeepSeek 等） |
@@ -50,8 +52,9 @@ prd-kb/
 │   ├── routes.py               # 路由: /health, /chat, /chat/stream
 │   └── schemas.py              # Pydantic 请求/响应模型
 ├── core/                       # 核心 RAG 引擎
+│   ├── config_loader.py        # YAML 配置加载（环境变量覆盖）
 │   ├── knowledge_base.py       # 知识库初始化编排（加载→清洗→分块→入库）
-│   ├── document_loader.py      # 多格式文档加载
+│   ├── document_loader.py      # 多格式文档加载（含图片）
 │   ├── document_clean.py       # 文本清洗降噪
 │   ├── embedding.py            # BGE 嵌入模型加载
 │   ├── vector_store.py         # ChromaDB 封装
@@ -59,6 +62,8 @@ prd-kb/
 │   ├── agent_chain.py          # ReAct Agent LangGraph 链路
 │   ├── session_store.py        # 会话历史 SQLite 持久化
 │   ├── tools.py                # Agent 工具集
+│   ├── multimodal.py           # 多模态消息/图片内容构建
+│   ├── image_processor.py      # 图片 OCR 与内容描述
 │   └── strategy/               # 策略层（策略模式）
 │       ├── base_strategy.py
 │       ├── chunk_strategy.py        # 分块策略
@@ -81,7 +86,8 @@ prd-kb/
 │   ├── Dockerfile              # 容器镜像构建
 │   └── docker-compose.yml      # 一键编排启动
 ├── requirements.txt
-└── pyproject.toml
+├── pyproject.toml
+└── LICENSE                    # MIT 开源许可
 ```
 
 ---
@@ -122,7 +128,7 @@ cp config/settings.example.yaml config/settings.yaml
 
 ### 4. 放入知识库文档
 
-将需要入库的文档放入 `docs/` 目录（支持 .pdf / .txt / .docx / .md / .xlsx）。
+将需要入库的文档放入 `docs/` 目录（支持 .pdf / .txt / .docx / .md / .xlsx，以及 .png / .jpg / .jpeg / .webp / .bmp 图片）。
 
 ---
 
@@ -161,6 +167,8 @@ python run_api.py
 }
 ```
 
+> `images` 为可选字段：传入 `data:image/` 开头的 data URL 数组（最多 4 张），即可发起多模态图片问答。
+
 ### 方式三：Docker 部署
 
 ```bash
@@ -194,15 +202,15 @@ eval_venv/Scripts/python.exe eval/run_evaluation.py
 
 ---
 
-## 多模态支持（占位）
+## 多模态支持
 
-当前已打通多模态消息链路与文档图片入库链路，外部模型能力以占位实现：
+支持图片问答与图片文档检索，多模态链路覆盖：
 
-- 聊天图片输入：前端支持选择图片并以 data URL 传给后端，Agent 会以多模态消息交给视觉模型。视觉模型名称通过 `config/settings.yaml` 的 `llm.vision_model` 配置，留空时回退使用 `llm.model_name`。
-- 文档图片检索：将 `png/jpg/jpeg/webp/bmp` 放入 `docs/` 后会自动入库，`core/image_processor.py::describe_image()` 会复用 `llm.vision_model` 对图片做 OCR 与内容描述。
-- 检索命中的图片会以图片数据块传给 Agent，并在回答中保留 `/media/...` 图片引用。
+- 聊天图片输入：前端支持选择图片并以 data URL 传给后端，Agent 以多模态消息完成理解与回答。视觉模型名称通过 `config/settings.yaml` 的 `llm.vision_model` 配置，留空时回退使用 `llm.model_name`。
+- 文档图片检索：将 `png/jpg/jpeg/webp/bmp` 放入 `docs/` 后自动入库，`core/image_processor.py::describe_image()` 复用 `llm.vision_model` 对图片做 OCR 与内容描述。
+- 检索回显：命中图片以图片数据块传给 Agent，并在回答中保留 `/media/...` Markdown 图片引用。
 
-> 图片内容识别依赖 `llm.vision_model` 配置的视觉模型；未配置时回退使用 `llm.model_name`，若该模型不支持图片会回退到占位描述。
+> 图片内容识别依赖 `llm.vision_model` 配置的视觉模型；未配置时回退使用 `llm.model_name`。
 
 ---
 
@@ -212,6 +220,7 @@ eval_venv/Scripts/python.exe eval/run_evaluation.py
 文档入库流水线:
   docs/ → load_document() → clean_raw_text() → get_document_splitter()
   → add_texts() → ChromaDB 持久化
+  图片分支: 图片文件 → describe_image() 生成描述 → 整块入库
 
 问答链路（Agent 模式）:
   用户问题 → agent_node(LLM 决策)
@@ -234,4 +243,4 @@ eval_venv/Scripts/python.exe eval/run_evaluation.py
 
 ## License
 
-MIT
+本项目采用 [MIT](LICENSE) 开源协议。
