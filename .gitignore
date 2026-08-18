@@ -40,8 +40,6 @@ config/settings.yaml
 *.swp
 *.swo
 *~
-.workbuddy/
-.codebuddy/
 
 # ========== 系统文件 ==========
 .DS_Store
@@ -55,3 +53,7 @@ Thumbs.db
 
 # ========== Docker 忽略 ==========
 # .dockerignore 已单独维护，此处忽略无需提交的本地卷数据
+
+# ========== RAGAS 评估独立环境 ==========
+eval_venv/
+eval/output/

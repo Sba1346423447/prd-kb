@@ -76,10 +76,12 @@ prd-kb/
 │   └── js/
 │       └── app.js              # 前端交互脚本
 ├── docs/                       # 知识库文档目录（已 .gitignore）
+├── eval/                       # RAGAS 效果评估脚本（独立 venv）
+├── docker/
+│   ├── Dockerfile              # 容器镜像构建
+│   └── docker-compose.yml      # 一键编排启动
 ├── requirements.txt
-├── pyproject.toml
-├── Dockerfile
-└── docker-compose.yml
+└── pyproject.toml
 ```
 
 ---
@@ -95,7 +97,7 @@ prd-kb/
 ### 1. 克隆项目
 
 ```bash
-git clone https://gitcode.com/Sba123_/prd-kb.git
+git clone https://github.com/Sba1346423447/prd-kb.git
 cd prd-kb
 ```
 
@@ -162,10 +164,45 @@ python run_api.py
 ### 方式三：Docker 部署
 
 ```bash
+cd docker
 docker-compose up -d
 ```
 
 > 首次启动前请修改 `docker-compose.yml` 中的模型挂载路径为本地实际路径。
+
+---
+
+## RAGAS 效果评估
+
+项目内置 RAGAS 评估脚本，用于量化“检索 + 生成”链路质量，覆盖 Faithfulness、
+AnswerRelevancy、ContextPrecision、ContextRecall 和 AnswerCorrectness 指标。
+
+```bash
+# 1. 创建独立评估环境并安装依赖
+python -m venv eval_venv
+eval_venv/Scripts/python.exe -m pip install -r eval/requirements.txt
+
+# 2. 从 docs/answerbook.md 构建评估数据集
+eval_venv/Scripts/python.exe eval/build_eval_dataset.py
+
+# 3. 先小规模验证，再全量评估
+eval_venv/Scripts/python.exe eval/run_evaluation.py --limit 10
+eval_venv/Scripts/python.exe eval/run_evaluation.py
+```
+
+评估结果输出到 `eval/output/`，详细说明见 `eval/README.md`。
+
+---
+
+## 多模态支持（占位）
+
+当前已打通多模态消息链路与文档图片入库链路，外部模型能力以占位实现：
+
+- 聊天图片输入：前端支持选择图片并以 data URL 传给后端，Agent 会以多模态消息交给视觉模型。视觉模型名称通过 `config/settings.yaml` 的 `llm.vision_model` 配置，留空时回退使用 `llm.model_name`。
+- 文档图片检索：将 `png/jpg/jpeg/webp/bmp` 放入 `docs/` 后会自动入库，`core/image_processor.py::describe_image()` 会复用 `llm.vision_model` 对图片做 OCR 与内容描述。
+- 检索命中的图片会以图片数据块传给 Agent，并在回答中保留 `/media/...` 图片引用。
+
+> 图片内容识别依赖 `llm.vision_model` 配置的视觉模型；未配置时回退使用 `llm.model_name`，若该模型不支持图片会回退到占位描述。
 
 ---
 

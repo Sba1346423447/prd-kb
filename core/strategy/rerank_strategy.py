@@ -1,7 +1,7 @@
 """
 重排序策略模块
 
-提供 BGE 模型重排序与 LLM 深度重排序两种策略，支持文档去重、表格加权与全局单例缓存。
+提供 BGE 模型重排序策略，支持文档去重、表格加权与全局单例缓存。
 """
 from typing import List, Optional, Dict
 import torch

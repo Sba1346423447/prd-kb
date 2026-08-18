@@ -5,7 +5,7 @@
 
 
 class DocumentLoadError(Exception):
-    """文档加载与解析失败异常，PDF、TXT、DOCX等格式文件读取失败时抛出"""
+    """文档加载与解析失败异常，PDF、TXT、DOCX、XLSX、图片等格式文件读取失败时抛出"""
     pass
 
 
