@@ -21,6 +21,7 @@ from core.llm_client import init_llm
 from core.tools import get_rag_tools
 from core.agent_chain import build_agent_graph
 from core.strategy.rerank_strategy import get_reranker
+from core.multimodal import content_to_text
 from langchain_core.messages import HumanMessage
 
 
@@ -40,6 +41,7 @@ def main():
         base_url=llm_config["base_url"],
         model_name=llm_config["model_name"],
         temperature=llm_config["temperature"],
+        vision_model=llm_config.get("vision_model"),
     )
 
     retriever = build_advanced_retriever(chroma_helper, retrieval_config)
@@ -78,7 +80,7 @@ def main():
                 else:
                     msg_chunk = chunk
                 if hasattr(msg_chunk, "content") and msg_chunk.content:  # type: ignore[union-attr]
-                    print(msg_chunk.content, end="", flush=True)  # type: ignore[union-attr]
+                    print(content_to_text(msg_chunk.content), end="", flush=True)  # type: ignore[union-attr]
             print()
 
         except Exception as e:

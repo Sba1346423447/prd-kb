@@ -4,6 +4,8 @@
 使用 Pydantic 定义请求体与响应体的数据结构，提供字段校验与默认值，
 确保前后端数据交互的类型安全。
 """
+from typing import List
+
 from pydantic import BaseModel, Field
 
 
@@ -16,6 +18,10 @@ class ChatRequest(BaseModel):
     """
     question: str = Field(..., description="用户提问内容")
     session_id: str = Field(default="default", description="会话ID，用于区分不同对话上下文")
+    images: List[str] = Field(
+        default_factory=list,
+        description="图片 data URL 列表，用于多模态问答",
+    )
 
 
 class ChatResponse(BaseModel):

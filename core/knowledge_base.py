@@ -12,6 +12,7 @@ from core.document_clean import clean_raw_text
 from core.strategy.chunk_strategy import get_document_splitter
 from core.embedding import load_bge_model
 from core.vector_store import ChromaDBHelper
+from core.multimodal import IMAGE_EXTENSIONS
 
 
 def _make_chunk_id(file_name: str, idx: int) -> str:
@@ -61,7 +62,7 @@ def init_knowledge_base(config: dict, dir_path: str):
 
     chunk_config = config["chunk"]
     per_type_overrides = chunk_config.get("per_type", {})
-    support_exts = [".pdf", ".txt", ".docx", ".md", ".xlsx"]
+    support_exts = [".pdf", ".txt", ".docx", ".md", ".xlsx", *sorted(IMAGE_EXTENSIONS)]
 
     if chroma_helper.has_data():
         if chroma_helper.needs_migration():
@@ -78,7 +79,7 @@ def init_knowledge_base(config: dict, dir_path: str):
     for fp in file_list:
         try:
             logger.info(f"正在处理文档：{fp}")
-            raw_text = load_document(fp)
+            raw_text = load_document(fp, config=config)
             clean_text = clean_raw_text(raw_text)
             if not clean_text.strip():
                 logger.warning(f"{fp} 清洗后无有效文本，跳过")
@@ -98,7 +99,8 @@ def init_knowledge_base(config: dict, dir_path: str):
                 "file_path": fp,
                 "file_name": file_name,
                 "file_ext": file_ext,
-                "is_table": file_ext == ".xlsx"
+                "is_table": file_ext == ".xlsx",
+                "is_image": file_ext in IMAGE_EXTENSIONS,
             }
             doc = Document(page_content=clean_text, metadata=doc_meta)
             chunk_docs = splitter.split([doc])

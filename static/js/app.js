@@ -11,10 +11,16 @@ const userInput = document.getElementById('userInput');
 const sendBtn = document.getElementById('sendBtn');
 const stopBtn = document.getElementById('stopBtn');
 const toast = document.getElementById('toast');
+const imagePickerBtn = document.getElementById('imagePickerBtn');
+const imageInput = document.getElementById('imageInput');
+const imagePreviewArea = document.getElementById('imagePreviewArea');
 
 /* ========== 全局状态 ========== */
 let isStreaming = false;
 let abortController = null;
+let selectedImages = [];
+
+const MAX_IMAGES = 4;
 
 /* ========== 推荐问题列表 ========== */
 const suggestionList = [
@@ -105,7 +111,7 @@ function scrollToBottom() {
  * @param {boolean} isStreamingMsg - 是否为流式消息，true 时显示光标闪烁动画
  * @returns {HTMLElement} 创建的消息 DOM 元素
  */
-function addMessage(role, content, isStreamingMsg) {
+function addMessage(role, content, isStreamingMsg, imageDataUrls) {
   const welcomeEl = document.getElementById('welcome');
   if (welcomeEl) welcomeEl.remove();
   const msgDiv = document.createElement('div');
@@ -143,9 +149,12 @@ function addMessage(role, content, isStreamingMsg) {
       });
     });
   } else {
+    const imagesHtml = (imageDataUrls || []).map(function(src) {
+      return '<div class="user-image"><img src="' + src + '" alt="用户图片"></div>';
+    }).join('');
     msgDiv.innerHTML =
       '<div class="avatar">U</div>' +
-      '<div class="bubble">' + escapeHtml(content) + '</div>';
+      '<div class="bubble">' + imagesHtml + escapeHtml(content) + '</div>';
   }
   chatContainer.appendChild(msgDiv);
   scrollToBottom();
@@ -173,6 +182,7 @@ function toggleThinking(section) {
 async function sendMessage() {
   const question = userInput.value.trim();
   if (!question || isStreaming) return;
+  const sentImages = selectedImages.slice();
 
   isStreaming = true;
   sendBtn.disabled = true;
@@ -180,8 +190,9 @@ async function sendMessage() {
   stopBtn.style.display = 'flex';
   userInput.value = '';
   userInput.style.height = 'auto';
+  clearImagePreviews();
 
-  addMessage('user', question);
+  addMessage('user', question, false, sentImages);
   const assistantMsg = addMessage('assistant', '', true);
   const bubble = assistantMsg.querySelector('.bubble');
   const thinkingSection = assistantMsg.querySelector('.thinking');
@@ -197,7 +208,8 @@ async function sendMessage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         question: question,
-        session_id: getSessionId()
+        session_id: getSessionId(),
+        images: sentImages
       }),
       signal: abortController.signal
     });
@@ -331,7 +343,81 @@ function newChat() {
     '<div class="suggestions" id="suggestions"></div>';
   chatContainer.appendChild(welcomeDiv);
   renderSuggestions();
+  clearImagePreviews();
   userInput.focus();
+}
+
+/* ========== 图片上传 ========== */
+
+/**
+ * 将选择的图片文件读取为 Base64 data URL 并加入待发送列表。
+ */
+function addImageFiles(files) {
+  Array.from(files).forEach(function(file) {
+    if (selectedImages.length >= MAX_IMAGES) {
+      showToast('最多上传 ' + MAX_IMAGES + ' 张图片');
+      return;
+    }
+    if (!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      selectedImages.push(e.target.result);
+      renderImagePreviews();
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * 渲染待发送图片预览，每张图片带移除按钮。
+ */
+function renderImagePreviews() {
+  imagePreviewArea.innerHTML = '';
+  selectedImages.forEach(function(dataUrl, index) {
+    const item = document.createElement('div');
+    item.className = 'image-preview-item';
+
+    const img = document.createElement('img');
+    img.src = dataUrl;
+    img.alt = '图片 ' + (index + 1);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'image-remove-btn';
+    removeBtn.textContent = '×';
+    removeBtn.title = '移除图片';
+    removeBtn.addEventListener('click', function() {
+      selectedImages.splice(index, 1);
+      renderImagePreviews();
+    });
+
+    item.appendChild(img);
+    item.appendChild(removeBtn);
+    imagePreviewArea.appendChild(item);
+  });
+}
+
+function clearImagePreviews() {
+  selectedImages = [];
+  imagePreviewArea.innerHTML = '';
+}
+
+/**
+ * 拦截输入框粘贴事件，如果剪贴板里有图片则加入待发送列表。
+ */
+function handleImagePaste(e) {
+  const items = e.clipboardData ? e.clipboardData.items : [];
+  const imageFiles = [];
+  for (const item of items) {
+    if (item.type && item.type.startsWith('image/')) {
+      const file = item.getAsFile();
+      if (file) imageFiles.push(file);
+    }
+  }
+  if (imageFiles.length > 0) {
+    e.preventDefault();
+    addImageFiles(imageFiles);
+  }
 }
 
 /* ========== 事件绑定 ========== */
@@ -339,6 +425,8 @@ userInput.addEventListener('input', function() {
   userInput.style.height = 'auto';
   userInput.style.height = Math.min(userInput.scrollHeight, 120) + 'px';
 });
+
+userInput.addEventListener('paste', handleImagePaste);
 
 userInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter' && !e.shiftKey) {
@@ -349,6 +437,13 @@ userInput.addEventListener('keydown', function(e) {
 
 sendBtn.addEventListener('click', sendMessage);
 stopBtn.addEventListener('click', stopGeneration);
+imagePickerBtn.addEventListener('click', function() {
+  imageInput.click();
+});
+imageInput.addEventListener('change', function() {
+  addImageFiles(imageInput.files);
+  imageInput.value = '';
+});
 
 document.getElementById('newChatBtn').addEventListener('click', newChat);
 

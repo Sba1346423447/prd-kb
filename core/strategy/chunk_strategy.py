@@ -1,7 +1,8 @@
 """
 文档分块策略模块
 
-根据文件类型（MD、XLSX、TXT、PDF/DOCX）自动选择最优分块策略，支持动态参数调整。
+根据文件类型（MD、XLSX、TXT、PDF/DOCX、图片）自动选择最优分块策略，
+支持动态参数调整。
 """
 from typing import List, Dict, Any, Optional
 from langchain_core.documents import Document
@@ -9,6 +10,7 @@ from langchain_text_splitters import (
     RecursiveCharacterTextSplitter,
     MarkdownHeaderTextSplitter
 )
+from core.multimodal import IMAGE_EXTENSIONS
 from core.strategy.base_strategy import BaseChunkStrategy
 from utils.logger import logger
 
@@ -97,6 +99,25 @@ class TxtChunkStrategy(BaseChunkStrategy):
                     final_chunks.append(chunk)
         return self._filter_small_chunk(final_chunks)
 
+
+class ImageChunkStrategy(BaseChunkStrategy):
+    """图片文件整块策略：整张图片的描述作为一个 chunk，不切分、不过滤。"""
+
+    def __init__(self, chunk_config: Dict[str, Any]):
+        self.chunk_config = chunk_config
+
+    def split(self, docs: List[Document], file_meta: Optional[Dict[str, Any]] = None) -> List[Document]:
+        logger.info("使用图片整块分块策略")
+        chunks = []
+        for doc in docs:
+            chunk = Document(
+                page_content=doc.page_content,
+                metadata={**doc.metadata, **(file_meta or {})},
+            )
+            chunks.append(chunk)
+        return chunks
+
+
 class DefaultRecursiveChunkStrategy(BaseChunkStrategy):
     """PDF/DOCX/未知后缀通用递归分块策略"""
     def __init__(self, chunk_config: Dict[str, Any], ext: str = ""):
@@ -131,6 +152,8 @@ def get_document_splitter(file_ext: str, chunk_config: Dict[str, Any]) -> BaseCh
         return ExcelChunkStrategy(chunk_config)
     elif ext == ".txt":
         return TxtChunkStrategy(chunk_config)
+    elif ext in IMAGE_EXTENSIONS:
+        return ImageChunkStrategy(chunk_config)
     elif ext in [".pdf", ".docx"]:
         return DefaultRecursiveChunkStrategy(chunk_config, ext)
     else:

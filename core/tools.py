@@ -3,11 +3,33 @@ Agent 工具注册模块
 
 定义知识库检索、文本统计、日志分析三类工具，供 Agent 通过 Function Calling 自动调度。
 """
+from pathlib import Path
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 from langchain.tools import tool
 from core.strategy import remove_dup_documents
 from utils.logger import logger
+
+DOCS_ROOT = Path(__file__).resolve().parent.parent / "docs"
+
+
+def _media_url(file_path: str) -> str:
+    """将 docs 目录下的本地图片路径转换为可访问的 /media URL。"""
+    try:
+        relative = Path(file_path).resolve().relative_to(DOCS_ROOT.resolve())
+        return "/media/" + relative.as_posix()
+    except ValueError:
+        return file_path
+
+
+def _format_retrieved_doc(doc: Document) -> str:
+    """拼接检索片段文本；图片片段额外附带图片标记与 Markdown 引用。"""
+    part = doc.page_content
+    if doc.metadata.get("is_image"):
+        file_path = doc.metadata.get("file_path", "")
+        part = f"【图片:{file_path}】\n{part}\n[图片文件]({_media_url(file_path)})"
+    return part
+
 
 def get_rag_tools(retriever: BaseRetriever, retrieval_config: dict, reranker=None):
     """根据传入的向量检索器，批量生成适配 Agent 调度的 RAG 工具列表
@@ -46,8 +68,22 @@ def get_rag_tools(retriever: BaseRetriever, retrieval_config: dict, reranker=Non
                 )
                 logger.info(f"已执行Rerank重排，最终选取{len(docs)}条文档")
 
-            result = "\n\n".join(doc.page_content for doc in docs)
-            logger.info(f"工具调用-知识库检索完成，命中{len(docs)}条相关文档")
+            # 工具返回限流：按块截断 + 字符兜底，保头部（rerank 排序靠前），不切断块内文本
+            max_result_docs = retrieval_config.get("max_result_docs", 5)
+            max_result_chars = retrieval_config.get("max_result_chars", 6000)
+
+            result_parts = []
+            total_chars = 0
+            for doc in docs[:max_result_docs]:
+                part = _format_retrieved_doc(doc)
+                if total_chars + len(part) > max_result_chars and result_parts:
+                    logger.info(f"检索结果超过字符上限({max_result_chars})，按块截断保留头部")
+                    break
+                result_parts.append(part)
+                total_chars += len(part)
+
+            result = "\n\n".join(result_parts)
+            logger.info(f"工具调用-知识库检索完成，命中{len(docs)}条，返回{len(result_parts)}条")
             return result if result else "未检索到相关文档内容"
         except Exception as e:
             logger.error(f"知识库检索工具调用失败:{str(e)}")

@@ -1,14 +1,18 @@
 """
 文档加载模块
 
-支持 PDF、TXT、DOCX、MD、XLSX 多格式文档加载，提供统一入口与动态分块策略选择。
+支持 PDF、TXT、DOCX、MD、XLSX、PNG/JPG/WebP/BMP 多格式文档加载，
+提供统一入口与动态分块策略选择。
 """
 import os
+from typing import Optional
 from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from docx import Document as DocxDocument
 from utils.logger import logger
 from utils.exceptions import DocumentLoadError
 from core.strategy.chunk_strategy import get_document_splitter
+from core.image_processor import describe_image
+from core.multimodal import IMAGE_EXTENSIONS
 
 def load_pdf(file_path: str) -> str:
     """加载 PDF 文件并提取纯文本内容"""
@@ -94,11 +98,23 @@ def load_xlsx(file_path: str) -> str:
     except Exception as e:
         raise DocumentLoadError(f"Excel加载失败：{str(e)}")
 
-def load_document(file_path: str) -> str:
+
+def load_image(file_path: str, config: Optional[dict] = None) -> str:
+    """加载图片文件并调用视觉模型生成文字描述。"""
+    try:
+        text = describe_image(file_path, config=config)
+        logger.info(f"成功加载图片文件：{file_path}")
+        return text
+    except Exception as e:
+        raise DocumentLoadError(f"图片加载失败：{str(e)}")
+
+
+def load_document(file_path: str, config: Optional[dict] = None) -> str:
     """通用文档加载入口，根据文件后缀自动识别格式并加载
 
     Args:
         file_path: 文档文件路径
+        config: 全局配置字典，加载图片时透传给视觉模型识别，纯文本格式可省略
 
     Returns:
         提取的纯文本内容
@@ -120,8 +136,13 @@ def load_document(file_path: str) -> str:
         return load_md(file_path)
     elif ext == ".xlsx":
         return load_xlsx(file_path)
+    elif ext in IMAGE_EXTENSIONS:
+        return load_image(file_path, config=config)
     else:
-        raise DocumentLoadError(f"不支持的文件格式：{ext}，仅支持 .pdf/.txt/.docx/.md/.xlsx")
+        raise DocumentLoadError(
+            f"不支持的文件格式：{ext}，仅支持 .pdf/.txt/.docx/.md/.xlsx"
+            " 以及 .png/.jpg/.jpeg/.webp/.bmp"
+        )
 
 def scan_directory_files(dir_path: str, support_exts: list[str]) -> list[str]:
     """遍历目录，筛选所有支持后缀的文档路径

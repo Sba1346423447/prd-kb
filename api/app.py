@@ -38,6 +38,7 @@ async def lifespan(app: FastAPI):
         base_url=llm_config["base_url"],
         model_name=llm_config["model_name"],
         temperature=llm_config["temperature"],
+        vision_model=llm_config.get("vision_model"),
     )
 
     retriever = build_advanced_retriever(chroma_helper, retrieval_config)
@@ -76,6 +77,10 @@ def create_app() -> FastAPI:
 
     static_dir = Path(__file__).parent.parent / "static"
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+    docs_dir = Path(__file__).parent.parent / "docs"
+    docs_dir.mkdir(exist_ok=True)
+    app.mount("/media", StaticFiles(directory=str(docs_dir)), name="media")
 
     @app.get("/")
     async def root():

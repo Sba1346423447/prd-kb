@@ -65,7 +65,9 @@
     </div>
 
     <div class="input-area">
-      <button class="plus-btn" title="添加">+</button>
+      <button class="plus-btn" id="imagePickerBtn" type="button" title="添加图片">+</button>
+      <input type="file" id="imageInput" accept="image/*" multiple hidden>
+      <div class="image-preview-area" id="imagePreviewArea"></div>
       <div class="input-wrapper">
         <textarea id="userInput" rows="1" placeholder="输入你的问题，按 Enter 发送，Shift+Enter 换行..."></textarea>
       </div>

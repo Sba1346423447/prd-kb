@@ -6,20 +6,49 @@
 import json
 import uuid
 from typing import Any, List
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from langchain_core.messages import HumanMessage, AIMessage
 from api.schemas import ChatRequest, ChatResponse, HealthResponse
 from api.dependencies import get_app_state, AppState
+from core.multimodal import (
+    build_human_content,
+    content_to_text,
+    parse_stored_content,
+    serialize_multimodal_content,
+)
 from utils.logger import logger
 
 router = APIRouter()
+
+MAX_IMAGES_PER_REQUEST = 4
 
 TOOL_LABEL_MAP = {
     "knowledge_base_search": "检索知识库",
     "log_analysis": "分析日志",
     "count_text_characters": "统计字数",
 }
+
+
+def _build_user_content(req: ChatRequest) -> Any:
+    if not req.images:
+        return req.question
+    _validate_images(req.images)
+    return build_human_content(req.question, req.images)
+
+
+def _validate_images(images: List[str]) -> None:
+    if len(images) > MAX_IMAGES_PER_REQUEST:
+        raise HTTPException(
+            status_code=400,
+            detail=f"单次最多上传 {MAX_IMAGES_PER_REQUEST} 张图片",
+        )
+    for image in images:
+        if not (isinstance(image, str) and image.startswith("data:image/")):
+            raise HTTPException(
+                status_code=400,
+                detail="图片必须是 data:image/ 开头的 data URL",
+            )
 
 
 def _build_history_messages(history: List[tuple]) -> List[Any]:
@@ -34,7 +63,7 @@ def _build_history_messages(history: List[tuple]) -> List[Any]:
     messages = []
     for role, content in history:
         if role == "human":
-            messages.append(HumanMessage(content=content))
+            messages.append(HumanMessage(content=parse_stored_content(content)))
         elif role == "ai":
             messages.append(AIMessage(content=content))
     return messages
@@ -65,7 +94,8 @@ async def chat(req: ChatRequest, state: AppState = Depends(get_app_state)):
 
     # 每次请求使用独立线程，从 SQLite 历史重建上下文，避免 checkpoint 累积与并发竞态
     history_messages = _build_history_messages(state.session_store.load_history(req.session_id))
-    history_messages.append(HumanMessage(content=req.question))
+    user_content = _build_user_content(req)
+    history_messages.append(HumanMessage(content=user_content))
     session_config: Any = {"configurable": {"thread_id": f"{req.session_id}_{uuid.uuid4().hex}"}}
 
     try:
@@ -73,8 +103,12 @@ async def chat(req: ChatRequest, state: AppState = Depends(get_app_state)):
             {"messages": history_messages},
             config=session_config
         )
-        answer = resp["messages"][-1].content
-        state.session_store.save_message(req.session_id, "human", req.question)
+        answer = content_to_text(resp["messages"][-1].content)
+        state.session_store.save_message(
+            req.session_id,
+            "human",
+            serialize_multimodal_content(user_content),
+        )
         state.session_store.save_message(req.session_id, "ai", answer)
         logger.info(f"会话 [{req.session_id}] 问答完成")
         return ChatResponse(answer=answer, session_id=req.session_id)
@@ -99,7 +133,8 @@ async def chat_stream(req: ChatRequest, state: AppState = Depends(get_app_state)
         return StreamingResponse(error_gen(), media_type="text/event-stream")
 
     history_messages = _build_history_messages(state.session_store.load_history(req.session_id))
-    history_messages.append(HumanMessage(content=req.question))
+    user_content = _build_user_content(req)
+    history_messages.append(HumanMessage(content=user_content))
     session_config: Any = {"configurable": {"thread_id": f"{req.session_id}_{uuid.uuid4().hex}"}}
     logger.info(f"流式会话 [{req.session_id}] 开始")
 
@@ -122,15 +157,20 @@ async def chat_stream(req: ChatRequest, state: AppState = Depends(get_app_state)
                     yield f"data: {json.dumps({'thinking': {'text': f'{label}完成'}})}\n\n"
                 elif kind == "on_chat_model_stream":
                     chunk = event["data"]["chunk"]
-                    if chunk.content:
+                    token_text = content_to_text(chunk.content)
+                    if token_text:
                         if not thinking_done:
                             thinking_done = True
                             yield f"data: {json.dumps({'thinking': {'done': True}})}\n\n"
-                        yield f"data: {json.dumps({'token': chunk.content})}\n\n"
+                        yield f"data: {json.dumps({'token': token_text})}\n\n"
 
             snapshot = state.agent_graph.get_state(session_config)
-            answer = snapshot.values["messages"][-1].content
-            state.session_store.save_message(req.session_id, "human", req.question)
+            answer = content_to_text(snapshot.values["messages"][-1].content)
+            state.session_store.save_message(
+                req.session_id,
+                "human",
+                serialize_multimodal_content(user_content),
+            )
             state.session_store.save_message(req.session_id, "ai", answer)
 
             yield f"data: {json.dumps({'done': True})}\n\n"
