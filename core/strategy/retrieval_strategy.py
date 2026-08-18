@@ -3,7 +3,7 @@
 
 实现向量检索 + BM25 关键词检索的 RRF 倒数排名融合，支持表格感知优先、上下文扩展与语义回退。
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
 from langchain_community.retrievers import BM25Retriever
@@ -128,6 +128,9 @@ def build_advanced_retriever(chroma_helper, retrieval_config: Dict[str, Any]) ->
     """
     vector_top_k = retrieval_config.get("vector_top_k", 8)
     bm25_top_k = retrieval_config.get("bm25_top_k", 8)
+    # 上下文扩展枷锁：限制相邻块扩展数量，防止无关邻居污染 Rerank 候选池
+    max_expand_per_doc = retrieval_config.get("max_expand_per_doc", 1)
+    max_expand_total = retrieval_config.get("max_expand_total", 4)
 
     vector_retriever = chroma_helper.get_retriever(search_kwargs={"k": vector_top_k})
 
@@ -154,6 +157,15 @@ def build_advanced_retriever(chroma_helper, retrieval_config: Dict[str, Any]) ->
     bm25_retriever = BM25Retriever.from_documents(doc_list)
     bm25_retriever.k = bm25_top_k
 
+    # 构建 (file_name, chunk_index) → Document 邻居哈希索引，
+    # 供上下文扩展 O(1) 查找相邻 chunk，替代原全库线性扫描热点。
+    neighbor_index: Dict[Tuple[str, int], Document] = {}
+    for doc in doc_list:
+        file_name = doc.metadata.get("file_name")
+        chunk_index = doc.metadata.get("chunk_index")
+        if file_name is not None and chunk_index is not None:
+            neighbor_index[(file_name, chunk_index)] = doc
+
     table_aware_strategy = TableAwareRetrievalStrategy(
         vector_retriever=vector_retriever,
         bm25_retriever=bm25_retriever,
@@ -162,7 +174,9 @@ def build_advanced_retriever(chroma_helper, retrieval_config: Dict[str, Any]) ->
 
     class LangChainHybridRetriever(BaseRetriever):
         strategy: TableAwareRetrievalStrategy
-        all_docs: List[Document]
+        neighbor_index: Dict[Tuple[str, int], Document]
+        max_expand_per_doc: int = 1
+        max_expand_total: int = 4
 
         def _get_relevant_documents(
             self, query: str, *, run_manager: CallbackManagerForRetrieverRun
@@ -171,24 +185,42 @@ def build_advanced_retriever(chroma_helper, retrieval_config: Dict[str, Any]) ->
             return self._expand_context(docs)
 
         def _expand_context(self, docs: List[Document]) -> List[Document]:
-            """对检索结果扩展相邻 chunk 上下文，提升回答完整性"""
+            """对检索结果扩展相邻 chunk 上下文，提升回答完整性
+
+            使用 (file_name, chunk_index) 哈希索引 O(1) 查找邻居，替代原全库线性扫描；
+            通过 max_expand_per_doc / max_expand_total 限制扩展数量，并按 RRF 排名顺序
+            优先扩展高分命中，防止大文档无关邻居无差别混入而污染 Rerank 候选池。
+            """
             expanded = list(docs)
             seen_keys = {(d.page_content, d.metadata.get("chunk_index", -1), d.metadata.get("file_name", "")) for d in docs}
+            added_count = 0
             for doc in docs:
-                file_name = doc.metadata.get("file_name", "")
+                if added_count >= self.max_expand_total:
+                    break
+                file_name = doc.metadata.get("file_name")
                 chunk_idx = doc.metadata.get("chunk_index")
                 if file_name is None or chunk_idx is None:
                     continue
+                per_doc_added = 0
                 for adj_offset in [-1, 1]:
-                    for candidate in self.all_docs:
-                        if (candidate.metadata.get("file_name") == file_name
-                                and candidate.metadata.get("chunk_index") == chunk_idx + adj_offset):
-                            key = (candidate.page_content, candidate.metadata.get("chunk_index", -1), candidate.metadata.get("file_name", ""))
-                            if key not in seen_keys:
-                                seen_keys.add(key)
-                                expanded.append(candidate)
+                    if per_doc_added >= self.max_expand_per_doc or added_count >= self.max_expand_total:
+                        break
+                    candidate = self.neighbor_index.get((file_name, chunk_idx + adj_offset))
+                    if candidate is None:
+                        continue
+                    key = (candidate.page_content, candidate.metadata.get("chunk_index", -1), candidate.metadata.get("file_name", ""))
+                    if key not in seen_keys:
+                        seen_keys.add(key)
+                        expanded.append(candidate)
+                        added_count += 1
+                        per_doc_added += 1
             return expanded
 
-    wrap_retriever = LangChainHybridRetriever(strategy=table_aware_strategy, all_docs=doc_list)
+    wrap_retriever = LangChainHybridRetriever(
+        strategy=table_aware_strategy,
+        neighbor_index=neighbor_index,
+        max_expand_per_doc=max_expand_per_doc,
+        max_expand_total=max_expand_total,
+    )
     logger.info("多路混合检索构建完成：向量检索+BM25关键词检索，采用RRF倒排融合+表格感知优先+上下文扩展")
     return wrap_retriever

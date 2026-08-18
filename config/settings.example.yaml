@@ -5,6 +5,7 @@ llm:
   api_key: "your-api-key-here"                         # 替换为你的 API Key
   base_url: "https://api.example.com/v1"               # 替换为你的 API 端点
   model_name: "your-model-name"                        # 替换为你的模型名称
+  vision_model: ""                                     # 视觉模型占位：支持图片输入时填写；留空则使用 model_name
   temperature: 0
 
 # 嵌入模型配置（BGE 中文系列）
@@ -43,3 +44,9 @@ retrieval:
   rerank_model_path: "/path/to/models/bge-reranker-v2-m3"  # Reranker 模型路径，Docker 部署时通过环境变量覆盖
   rerank_top_n: 3
   device: "cpu"
+  # 上下文扩展枷锁：限制相邻块扩展数量，防止无关邻居污染 Rerank 候选池
+  max_expand_per_doc: 1      # 每个命中文档最多扩展的相邻块数
+  max_expand_total: 4        # 单次检索最多新增的扩展块总数
+  # 工具返回限流：防止多轮检索结果撑爆模型上下文
+  max_result_docs: 5         # 单次工具返回的最大文档块数
+  max_result_chars: 6000     # 单次工具返回的最大字符数
