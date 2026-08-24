@@ -42,7 +42,8 @@ retrieval:
   rrf_k: 60
   enable_rerank: true
   rerank_model_path: "/path/to/models/bge-reranker-v2-m3"  # Reranker 模型路径，Docker 部署时通过环境变量覆盖
-  rerank_top_n: 3
+  # rerank_top_n 平衡点为 5：过小（3）会截掉相关块，answer correctness 下降约 20%（RAGAS 实测）
+  rerank_top_n: 5
   device: "cpu"
   # 上下文扩展枷锁：限制相邻块扩展数量，防止无关邻居污染 Rerank 候选池
   max_expand_per_doc: 1      # 每个命中文档最多扩展的相邻块数
