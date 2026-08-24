@@ -4,13 +4,15 @@ PRD-KB RAGAS 评估脚本
 复用 core/ 的初始化函数完成“检索 + 生成”，再由 RAGAS 对检索与生成质量进行量化打分。
 
 评估口径：
-- 不经过 Agent 链路，直接调用 retriever 检索 + LLM 基于上下文生成，聚焦评估“检索质量 + 生成忠实度”。
+- 不经过 Agent 决策链路，但检索后处理与线上工具保持一致：
+  去重 -> Rerank（可选）-> max_result_docs/max_result_chars 限流截断（对齐 core/tools.py）。
 - reference_contexts 采用近似方案：将 ground_truth 整体作为参考上下文（ContextRecall 略偏乐观，报告会注明）。
-- 默认启用生成结果缓存，中断后再次运行会自动复用已生成的样本。
+- 默认启用生成结果缓存（按“问题 + 检索变体”联合匹配），中断后再次运行会自动复用已生成的样本。
 
 用法（必须使用独立评估环境，主项目环境与 ragas 不兼容）：
     eval_venv\\Scripts\\python.exe eval\\run_evaluation.py
     eval_venv\\Scripts\\python.exe eval\\run_evaluation.py --limit 10
+    eval_venv\\Scripts\\python.exe eval\\run_evaluation.py --limit 10 --no-rerank --tag rerank_off
 """
 import argparse
 import hashlib
@@ -55,6 +57,8 @@ from langchain_openai import ChatOpenAI
 from core.config_loader import load_config
 from core.knowledge_base import init_knowledge_base
 from core.strategy.retrieval_strategy import build_advanced_retriever
+from core.strategy.rerank_strategy import get_reranker
+from core.strategy import remove_dup_documents
 
 EVAL_OUTPUT_DIR = Path(__file__).resolve().parent / "output"
 DEFAULT_DATASET = EVAL_OUTPUT_DIR / "eval_dataset.jsonl"
@@ -195,8 +199,16 @@ def generate_samples(
     cache_path: Path,
     use_cache: bool = True,
     force_regenerate: bool = False,
+    reranker=None,
+    retrieval_config: dict = None,
+    variant: str = "default",
 ) -> List[SingleTurnSample]:
-    """逐条检索 + 生成，支持缓存断点续跑。"""
+    """逐条检索 + 生成，支持缓存断点续跑。
+
+    检索后处理与线上工具链路对齐（core/tools.py::knowledge_base_search）：
+    去重 -> Rerank（reranker 不为 None 时）-> max_result_docs/max_result_chars 限流截断。
+    缓存按「问题 + reference_hash + variant」联合匹配，不同检索变体互不串用。
+    """
     cache = load_generated_cache(cache_path) if use_cache else {}
     samples = []
 
@@ -211,12 +223,34 @@ def generate_samples(
             and not force_regenerate
             and cached
             and cached.get("reference_hash") == reference_hash
+            and cached.get("variant", "") == variant
         ):
             sample_dict = cached
-            print(f"[run_evaluation] [{i}/{len(eval_dataset)}] 使用缓存: {question[:40]}...")
+            print(f"[run_evaluation] [{i}/{len(eval_dataset)}] 使用缓存({variant}): {question[:40]}...")
         else:
-            print(f"[run_evaluation] [{i}/{len(eval_dataset)}] 检索+生成: {question[:40]}...")
+            print(f"[run_evaluation] [{i}/{len(eval_dataset)}] 检索+生成({variant}): {question[:40]}...")
             ctx_docs: List[Document] = retriever.invoke(question)
+
+            # ---- 与线上工具链路对齐：去重 -> Rerank -> 限流截断 ----
+            ctx_docs = remove_dup_documents(ctx_docs)
+            if reranker is not None:
+                ctx_docs = reranker.rerank(
+                    query=question,
+                    candidates=ctx_docs,
+                    top_n=retrieval_config.get("rerank_top_n", 3) if retrieval_config else 3,
+                )
+            if retrieval_config:
+                max_result_docs = retrieval_config.get("max_result_docs", 5)
+                max_result_chars = retrieval_config.get("max_result_chars", 6000)
+                kept_docs: List[Document] = []
+                total_chars = 0
+                for doc in ctx_docs[:max_result_docs]:
+                    if total_chars + len(doc.page_content) > max_result_chars and kept_docs:
+                        break
+                    kept_docs.append(doc)
+                    total_chars += len(doc.page_content)
+                ctx_docs = kept_docs
+
             contexts = [doc.page_content for doc in ctx_docs]
             answer_content = gen_llm.invoke(
                 GEN_PROMPT.format(contexts="\n\n".join(contexts), question=question)
@@ -235,6 +269,7 @@ def generate_samples(
                 "reference": reference,
                 "reference_contexts": [reference],
                 "reference_hash": reference_hash,
+                "variant": variant,
             }
             if use_cache:
                 append_cache_sample(cache_path, sample_dict)
@@ -277,6 +312,17 @@ def main() -> None:
         action="store_true",
         help="RAGAS 指标异常时直接抛错，而不是输出 NaN",
     )
+    parser.add_argument(
+        "--no-rerank",
+        action="store_true",
+        help="跳过 Rerank 重排（对照实验用）；默认遵循配置 enable_rerank",
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        default="",
+        help="报告文件名后缀（如 rerank_off），用于区分对照实验产物",
+    )
     args = parser.parse_args()
 
     EVAL_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -288,9 +334,20 @@ def main() -> None:
 
     print("[run_evaluation] 加载配置...")
     config = load_config()
+    retrieval_config = config.get("retrieval", {})
 
     print("[run_evaluation] 初始化知识库与检索器...")
     retriever, emb_model = build_retriever(config)
+
+    reranker = None
+    if retrieval_config.get("enable_rerank", False) and not args.no_rerank:
+        print("[run_evaluation] 初始化 Reranker（对齐线上工具链路）...")
+        reranker = get_reranker(
+            model_path=retrieval_config["rerank_model_path"],
+            device=retrieval_config.get("device", "cpu"),
+        )
+    variant = "rerank_on" if reranker is not None else "rerank_off"
+    print(f"[run_evaluation] 检索变体: {variant}")
 
     print("[run_evaluation] 初始化生成 LLM...")
     gen_llm = build_llm(config)
@@ -302,6 +359,9 @@ def main() -> None:
         cache_path=DEFAULT_CACHE,
         use_cache=not args.no_cache,
         force_regenerate=args.force_regenerate,
+        reranker=reranker,
+        retrieval_config=retrieval_config,
+        variant=variant,
     )
     if not samples:
         print("[run_evaluation] 未生成任何评估样本，退出")
@@ -336,8 +396,9 @@ def main() -> None:
     )
 
     df = result.to_pandas()
-    details_path = EVAL_OUTPUT_DIR / "evaluation_details.csv"
-    report_path = EVAL_OUTPUT_DIR / "evaluation_report.json"
+    suffix = f"_{args.tag}" if args.tag else ""
+    details_path = EVAL_OUTPUT_DIR / f"evaluation_details{suffix}.csv"
+    report_path = EVAL_OUTPUT_DIR / f"evaluation_report{suffix}.json"
     df.to_csv(details_path, index=False)
 
     metric_names = [m.name for m in metrics if m.name in df.columns]
@@ -356,6 +417,7 @@ def main() -> None:
         "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "sample_count": len(samples),
         "scored_sample_count": scored_sample_count,
+        "retrieval_variant": variant,
         "metrics": avg,
         "nan_counts": nan_counts,
         "note": "reference_contexts 为近似口径：以标准答案整体作为参考上下文，ContextRecall 略偏乐观",

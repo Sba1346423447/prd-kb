@@ -31,6 +31,57 @@ def _format_retrieved_doc(doc: Document) -> str:
     return part
 
 
+def retrieve_context(retriever, retrieval_config: dict, reranker, query: str) -> str:
+    """执行单次检索流水线并格式化为可直接拼入提示词的上下文文本
+
+    流水线：混合检索 -> 去重 -> Rerank 重排 -> 数量与字符限流截断。
+    Agent 模式的 knowledge_base_search 工具与 Pure 直出模式共用本函数，
+    保证两种模式的检索口径完全一致。
+
+    Args:
+        retriever: 混合检索器实例
+        retrieval_config: 检索策略配置，包含 rerank 开关与返回限流参数
+        reranker: 预加载的 Rerank 模型实例，可为 None
+        query: 检索查询词
+
+    Returns:
+        拼接完成的检索上下文文本，无命中时返回固定提示语
+    """
+    docs: list[Document] = retriever.invoke(query)
+
+    docs = remove_dup_documents(docs)
+
+    for idx, doc in enumerate(docs):
+        logger.info(f"【检索片段{idx}】内容预览：{doc.page_content[:120]}")
+
+    enable_rerank = retrieval_config.get("enable_rerank", False)
+    if enable_rerank and reranker is not None:
+        docs = reranker.rerank(
+            query=query,
+            candidates=docs,
+            top_n=retrieval_config["rerank_top_n"]
+        )
+        logger.info(f"已执行Rerank重排，最终选取{len(docs)}条文档")
+
+    # 返回限流：按块截断 + 字符兜底，保头部（rerank 排序靠前），不切断块内文本
+    max_result_docs = retrieval_config.get("max_result_docs", 5)
+    max_result_chars = retrieval_config.get("max_result_chars", 6000)
+
+    result_parts = []
+    total_chars = 0
+    for doc in docs[:max_result_docs]:
+        part = _format_retrieved_doc(doc)
+        if total_chars + len(part) > max_result_chars and result_parts:
+            logger.info(f"检索结果超过字符上限({max_result_chars})，按块截断保留头部")
+            break
+        result_parts.append(part)
+        total_chars += len(part)
+
+    result = "\n\n".join(result_parts)
+    logger.info(f"知识库检索完成，命中{len(docs)}条，返回{len(result_parts)}条")
+    return result if result else "未检索到相关文档内容"
+
+
 def get_rag_tools(retriever: BaseRetriever, retrieval_config: dict, reranker=None):
     """根据传入的向量检索器，批量生成适配 Agent 调度的 RAG 工具列表
 
@@ -52,39 +103,9 @@ def get_rag_tools(retriever: BaseRetriever, retrieval_config: dict, reranker=Non
             query: 用户检索诉求
         """
         try:
-            docs: list[Document] = retriever.invoke(query)
-
-            docs = remove_dup_documents(docs)
-
-            for idx, doc in enumerate(docs):
-                logger.info(f"【检索片段{idx}】内容预览：{doc.page_content[:120]}")
-
-            enable_rerank = retrieval_config.get("enable_rerank", False)
-            if enable_rerank and reranker is not None:
-                docs = reranker.rerank(
-                    query=query,
-                    candidates=docs,
-                    top_n=retrieval_config["rerank_top_n"]
-                )
-                logger.info(f"已执行Rerank重排，最终选取{len(docs)}条文档")
-
-            # 工具返回限流：按块截断 + 字符兜底，保头部（rerank 排序靠前），不切断块内文本
-            max_result_docs = retrieval_config.get("max_result_docs", 5)
-            max_result_chars = retrieval_config.get("max_result_chars", 6000)
-
-            result_parts = []
-            total_chars = 0
-            for doc in docs[:max_result_docs]:
-                part = _format_retrieved_doc(doc)
-                if total_chars + len(part) > max_result_chars and result_parts:
-                    logger.info(f"检索结果超过字符上限({max_result_chars})，按块截断保留头部")
-                    break
-                result_parts.append(part)
-                total_chars += len(part)
-
-            result = "\n\n".join(result_parts)
-            logger.info(f"工具调用-知识库检索完成，命中{len(docs)}条，返回{len(result_parts)}条")
-            return result if result else "未检索到相关文档内容"
+            result = retrieve_context(retriever, retrieval_config, reranker, query)
+            logger.info(f"工具调用-知识库检索完成，返回{len(result)}字符")
+            return result
         except Exception as e:
             logger.error(f"知识库检索工具调用失败:{str(e)}")
             return f"检索工具执行异常:{str(e)}"
@@ -112,7 +133,6 @@ def get_rag_tools(retriever: BaseRetriever, retrieval_config: dict, reranker=Non
         Args:
             log_text: 用户粘贴的原始完整日志文本
         """
-        import re
         try:
             logger.info(f"执行工具 log_analysis，日志文本长度:{len(log_text)}")
             lines = log_text.splitlines()

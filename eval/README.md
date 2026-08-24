@@ -51,14 +51,32 @@ eval_venv\Scripts\python.exe eval\run_evaluation.py
 - `--no-cache`：忽略生成缓存，重新检索并生成
 - `--force-regenerate`：缓存匹配也重新生成
 - `--strict`：指标异常时直接抛错，而不是静默输出 NaN
+- `--no-rerank`：跳过 Rerank 重排（对照实验）；默认遵循配置 `retrieval.enable_rerank`
+- `--tag NAME`：报告/明细文件名后缀，用于区分对照实验产物
+
+## Rerank 对照实验
+
+评估链路与线上工具行为对齐（去重 → Rerank → `max_result_docs`/`max_result_chars` 截断），
+可通过开关对比有无 Rerank 的检索质量差异：
+
+```powershell
+# 实验组：Rerank 开启（遵循配置 enable_rerank: true）
+eval_venv\Scripts\python.exe eval\run_evaluation.py --limit 10 --tag rerank_on
+
+# 对照组：Rerank 关闭
+eval_venv\Scripts\python.exe eval\run_evaluation.py --limit 10 --no-rerank --tag rerank_off
+```
+
+两组的报告分别输出到 `evaluation_report_rerank_on.json` / `evaluation_report_rerank_off.json`；
+生成缓存按「问题 + 检索变体」联合匹配，两组互不串用。
 
 ## 输出
 
-- `eval/output/evaluation_report.json`：平均分报告
-- `eval/output/evaluation_details.csv`：逐样本明细
+- `eval/output/evaluation_report.json`：平均分报告（带 `--tag` 时为 `evaluation_report_{tag}.json`）
+- `eval/output/evaluation_details.csv`：逐样本明细（同上按 tag 区分）
 - `eval/output/generated_samples.jsonl`：检索 + 生成结果缓存，中断后可续跑
 
 ## 评估口径说明
 
-- 当前评估直接调用检索器 + 上下文生成，不经过 Agent 工具调度链路。
+- 评估不经过 Agent 决策链路，但检索后处理与线上工具保持一致：去重 → Rerank（可关）→ 限流截断。
 - `reference_contexts` 使用标准答案整体作为参考上下文，ContextRecall 结果会略偏乐观。

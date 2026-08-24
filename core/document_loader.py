@@ -10,7 +10,6 @@ from langchain_community.document_loaders import PyPDFLoader, TextLoader
 from docx import Document as DocxDocument
 from utils.logger import logger
 from utils.exceptions import DocumentLoadError
-from core.strategy.chunk_strategy import get_document_splitter
 from core.image_processor import describe_image
 from core.multimodal import IMAGE_EXTENSIONS
 

@@ -16,16 +16,29 @@ torch>=2.0.0
 
 # ========== 向量数据库 ==========
 chromadb==1.5.9
+rank-bm25==0.2.2
+jieba==0.42.1
+
 # ========== 文档解析依赖 ==========
 pypdf==6.13.2
 python-docx==1.2.0
 openpyxl>=3.1.0
 # Markdown / TXT 使用 langchain TextLoader，无需额外依赖
 
+# ========== 关系数据库（MySQL 状态外置） ==========
+sqlalchemy>=2.0
+pymysql>=1.1
+cryptography>=42.0
+alembic>=1.13
+
 # ========== Web API 依赖 ==========
 fastapi==0.115.0
 uvicorn==0.30.0
 pydantic>=2.0.0
+
+# ========== 鉴权 ==========
+pyjwt>=2.8
+bcrypt>=4.1
 
 # ========== 工具类依赖 ==========
 PyYAML==6.0.3

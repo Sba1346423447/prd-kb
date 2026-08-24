@@ -16,12 +16,21 @@ env/
 
 # ========== 向量数据库持久化目录 ==========
 chroma_db/
+chroma_db_eval/
 
 # ========== 会话历史数据库（用户数据，不提交） ==========
 session_history.db
 
-# ========== 知识库文档（用户数据，不提交） ==========
-docs/
+# ========== 知识库源文档与个人工程文档（用户数据/内部记录，不提交） ==========
+docs/*
+
+# ========== 个人工程文档（对标分析/优化方案/架构设计稿，与项目运行无关，不提交） ==========
+MaxKB.md
+Optimization-Plan.md
+ARCHITECTURE.md
+
+# ========== 个人产出（简历/报告草稿，不提交） ==========
+output/
 
 # ========== 日志文件 ==========
 logs/
@@ -33,6 +42,7 @@ config/settings.yaml
 !config/settings.example.yaml
 .env
 .env.*
+!.env.example
 
 # ========== IDE / 编辑器 ==========
 .vscode/

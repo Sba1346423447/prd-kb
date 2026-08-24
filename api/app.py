@@ -17,6 +17,7 @@ from core.tools import get_rag_tools
 from core.agent_chain import build_agent_graph
 from core.strategy.rerank_strategy import get_reranker
 from api.dependencies import app_state
+from api.auth import router as auth_router
 from api.routes import router
 
 
@@ -73,6 +74,7 @@ def create_app() -> FastAPI:
         version="1.0.0",
         lifespan=lifespan
     )
+    app.include_router(auth_router)
     app.include_router(router)
 
     static_dir = Path(__file__).parent.parent / "static"

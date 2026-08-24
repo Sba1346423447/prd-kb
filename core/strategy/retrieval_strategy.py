@@ -3,6 +3,7 @@
 
 实现向量检索 + BM25 关键词检索的 RRF 倒数排名融合，支持表格感知优先、上下文扩展与语义回退。
 """
+import re
 from typing import List, Dict, Any, Optional, Tuple
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.documents import Document
@@ -10,6 +11,33 @@ from langchain_community.retrievers import BM25Retriever
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from core.strategy.base_strategy import BaseRetrievalStrategy
 from utils.logger import logger
+
+# 非中英文数字字符（标点、空白、Markdown 符号等），BM25 分词时直接丢弃
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+|[\u4e00-\u9fff]+")
+
+
+def chinese_tokenize(text: str) -> List[str]:
+    """BM25 中文分词器：jieba 搜索模式 + 英文数字整词保留
+
+    索引与查询两侧共用本函数。英文/数字串作为整 token（保证 docker、RAG、
+    P007 等技术词精确匹配），中文段先交给 jieba 搜索模式分词（长词切分并
+    保留子词以提升召回），再过滤空串与单标点。
+
+    Args:
+        text: 待分词文本
+
+    Returns:
+        小写化 token 列表
+    """
+    import jieba
+
+    tokens: List[str] = []
+    for segment in _TOKEN_RE.findall(text):
+        if segment[0].isascii():
+            tokens.append(segment.lower())
+        else:
+            tokens.extend(jieba.lcut_for_search(segment))
+    return [t for t in tokens if t.strip()]
 
 def reciprocal_rank_fusion(results: List[List[Document]], k: int = 60) -> List[Document]:
     """RRF 倒数排名融合算法
@@ -154,7 +182,9 @@ def build_advanced_retriever(chroma_helper, retrieval_config: Dict[str, Any]) ->
             ) -> List[Document]:
                 return self.strategy.retrieve(query)
         return LangChainSemanticRetriever(strategy=semantic_strategy)
-    bm25_retriever = BM25Retriever.from_documents(doc_list)
+    # 中文分词器必须显式传入：LangChain 默认按空格切分，中文整句会退化为
+    # 单个巨型 token，导致 BM25 对中文查询完全失效（返回凑数文档）
+    bm25_retriever = BM25Retriever.from_documents(doc_list, preprocess_func=chinese_tokenize)
     bm25_retriever.k = bm25_top_k
 
     # 构建 (file_name, chunk_index) → Document 邻居哈希索引，

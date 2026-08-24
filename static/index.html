@@ -9,6 +9,20 @@
 </head>
 <body>
 
+<!-- 登录遮罩层 -->
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-card">
+    <div class="login-logo">智</div>
+    <div class="login-title">PRD-KB 企业技术支持智研知识库</div>
+    <form id="loginForm" autocomplete="off">
+      <input class="login-input" id="loginUsername" placeholder="用户名" autocomplete="username">
+      <input class="login-input" id="loginPassword" type="password" placeholder="密码" autocomplete="current-password">
+      <button class="login-submit" type="submit">登 录</button>
+    </form>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
 <div class="app">
   <div class="sidebar">
     <div class="sidebar-top">
@@ -34,10 +48,10 @@
       </div>
     </div>
     <div class="sidebar-spacer"></div>
-    <div class="sidebar-bottom" title="点击进入个人主页">
-      <div class="sidebar-user-avatar">U</div>
-      <span class="sidebar-user-name">用户</span>
-      <span class="sidebar-user-arrow">→</span>
+    <div class="sidebar-bottom">
+      <div class="sidebar-user-avatar" id="userAvatar">U</div>
+      <span class="sidebar-user-name" id="userName">未登录</span>
+      <span class="sidebar-user-logout" id="logoutBtn" title="退出登录">退出</span>
     </div>
   </div>
 
@@ -53,7 +67,7 @@
       </div>
       <div class="topbar-session">
         <span class="topbar-session-label">会话</span>
-        <input class="topbar-session-input" id="sessionId" value="user_001" placeholder="会话ID">
+        <input class="topbar-session-input" id="sessionId" value="" placeholder="点击新对话创建" readonly>
       </div>
     </div>
 
@@ -70,6 +84,17 @@
       <div class="image-preview-area" id="imagePreviewArea"></div>
       <div class="input-wrapper">
         <textarea id="userInput" rows="1" placeholder="输入你的问题，按 Enter 发送，Shift+Enter 换行..."></textarea>
+      </div>
+      <div class="quick-dropdown" id="modeDropdown">
+        <button class="quick-btn" id="modeBtn" type="button" title="切换检索模式">
+          <span id="modeLabel">Agent</span>
+          <span class="quick-btn-arrow">&#9662;</span>
+        </button>
+        <div class="quick-menu">
+          <div class="quick-item" data-mode="auto" title="按问题特征自动选择最优模式">Auto</div>
+          <div class="quick-item" data-mode="pure" title="检索直出，响应更快">Pure</div>
+          <div class="quick-item active" data-mode="agent" title="更高质量的回复">Agent</div>
+        </div>
       </div>
       <button class="send-btn" id="sendBtn" title="发送">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">

@@ -2,12 +2,50 @@
 Chroma 向量数据库操作模块
 
 封装向量库初始化、文本块入库、相似度检索与检索器获取能力，提供统一的向量存储操作接口。
+入库与查询的向量化输入统一做文本规范化（去 emoji + 压缩空白），降低嵌入模型噪声。
 """
+import re
 from typing import Any, Dict, List, Optional
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from utils.logger import logger
 from utils.exceptions import VectorStoreError
+
+# emoji 与象形符号区段（BGE 对此类噪声敏感）
+_EMOJI_RE = re.compile(r"[\U0001F300-\U0001FAFF]")
+_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def normalize_for_embedding(text: str) -> str:
+    """向量化前的文本规范化：去除 emoji，连续空白压缩为单个空格
+
+    Args:
+        text: 原始文本
+
+    Returns:
+        规范化后的文本；非字符串输入原样返回
+    """
+    if not isinstance(text, str):
+        return text
+    return _WHITESPACE_RE.sub(" ", _EMOJI_RE.sub("", text)).strip()
+
+
+class NormalizingEmbeddings:
+    """嵌入模型包装器：所有向量化输入（入库文档与检索 query）统一先做规范化
+
+    仅影响送入嵌入模型的文本，向量库中存储的原文保持不变，
+    保证 LLM 上下文与 BM25 索引仍使用原始文档内容。
+    """
+
+    def __init__(self, base_embeddings):
+        self._base = base_embeddings
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self._base.embed_documents([normalize_for_embedding(t) for t in texts])
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._base.embed_query(normalize_for_embedding(text))
+
 
 class ChromaDBHelper:
     """Chroma 向量数据库操作封装类
@@ -24,7 +62,7 @@ class ChromaDBHelper:
             collection_name: 向量库集合名称，默认 rag_docs
         """
         self.persist_directory = persist_directory
-        self.embedding_function = embedding_function
+        self.embedding_function = NormalizingEmbeddings(embedding_function)
         self.collection_name = collection_name
 
         try:

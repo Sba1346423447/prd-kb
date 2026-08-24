@@ -2,12 +2,11 @@
 Agent 智能问答链路
 
 基于 LangGraph 实现 ReAct Agent 状态图，支持 LLM 自主决策工具调用、检索计数上限控制与检索结果去重。
-会话记忆由 SQLite 业务表持久化（见 core/session_store.py），MemorySaver 仅作为编译必需参数。
+会话记忆由 MySQL 业务表持久化（见 core/session_store.py），MemorySaver 仅作为编译必需参数。
 """
 import hashlib
 from typing import List
 from langchain_core.messages import ToolMessage, HumanMessage
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph import StateGraph, MessagesState
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END

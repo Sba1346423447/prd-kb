@@ -1,6 +1,21 @@
 version: "3.8"
 
 services:
+  mysql:
+    image: mysql:8.4
+    container_name: prd_kb_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-prd_kb_root}
+      MYSQL_DATABASE: ${DB_NAME:-prd_kb}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   rag:
     build:
       context: ..
@@ -9,11 +24,36 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - D:/Langchain/models/bge-small-zh-v1.5:/app/models/bge-small-zh-v1.5
-      - D:/models/BAAI/bge-reranker-v2-m3:/app/models/bge-reranker-v2-m3
+      - ${EMBEDDING_MODEL_DIR:-../models/bge-small-zh-v1.5}:/app/models/bge-small-zh-v1.5:ro
+      - ${RERANK_MODEL_DIR:-../models/bge-reranker-v2-m3}:/app/models/bge-reranker-v2-m3:ro
       - ../chroma_db:/app/chroma_db
+      - app_logs:/app/utils/logs
     environment:
       - EMBEDDING_MODEL_PATH=/app/models/bge-small-zh-v1.5
       - RERANK_MODEL_PATH=/app/models/bge-reranker-v2-m3
       - CHROMA_PERSIST_DIR=/app/chroma_db
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_USER=root
+      - DB_PASSWORD=${DB_PASSWORD:-prd_kb_root}
+      - DB_NAME=${DB_NAME:-prd_kb}
+      - JWT_SECRET=${JWT_SECRET:-change-me-in-production}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      mysql:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     restart: unless-stopped
+
+volumes:
+  mysql_data:
+  app_logs:

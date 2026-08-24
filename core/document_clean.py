@@ -11,7 +11,7 @@ from utils.exceptions import DocumentLoadError
 def clean_raw_text(raw_text: str) -> str:
     """执行完整文本清洗流水线，去除文档噪声内容
 
-    清洗步骤：移除不可见控制字符 -> 压缩连续空行 -> 去除行首尾空格 -> 压缩连续空格 -> 首尾裁剪。
+    清洗步骤：Unicode 不可见字符空格化 -> 移除 ASCII 控制字符 -> 压缩连续空行 -> 去除行首尾空格 -> 压缩连续空格 -> 首尾裁剪。
 
     Args:
         raw_text: 文档加载后得到的原始文本字符串
@@ -29,6 +29,8 @@ def clean_raw_text(raw_text: str) -> str:
     try:
         text = raw_text
 
+        # 统一 Unicode 不可见字符为普通空格：BOM(\ufeff)/零宽空格(\u200b)/NBSP(\u00a0)/全角空格(\u3000)
+        text = re.sub(r"[\ufeff\u200b\u00a0\u3000]+", " ", text)
         text = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
         text = re.sub(r"\n\s*\n+", "\n", text)
         lines = [line.strip() for line in text.splitlines()]

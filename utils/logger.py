@@ -4,7 +4,6 @@
 提供控制台输出 + 滚动文件输出双日志处理器，支持自动创建日志目录与避免重复初始化。
 """
 import logging
-import sys
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
 

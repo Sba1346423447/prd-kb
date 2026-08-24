@@ -1,8 +1,8 @@
 /**
  * 企业技术支持智研知识库（PRD-KB）—— 前端交互脚本
  *
- * 核心能力：SSE 流式对话、Markdown 渲染、思考过程可视化。
- * 依赖：marked.js（Markdown 解析库，通过 CDN 加载）。
+ * 核心能力：登录鉴权（JWT）、SSE 流式对话、Markdown 渲染、思考过程可视化。
+ * 依赖：marked.js（Markdown 解析库）。
  */
 
 /* ========== DOM 元素引用 ========== */
@@ -14,6 +14,10 @@ const toast = document.getElementById('toast');
 const imagePickerBtn = document.getElementById('imagePickerBtn');
 const imageInput = document.getElementById('imageInput');
 const imagePreviewArea = document.getElementById('imagePreviewArea');
+const loginOverlay = document.getElementById('loginOverlay');
+const loginForm = document.getElementById('loginForm');
+const loginError = document.getElementById('loginError');
+const sessionIdInput = document.getElementById('sessionId');
 
 /* ========== 全局状态 ========== */
 let isStreaming = false;
@@ -21,6 +25,176 @@ let abortController = null;
 let selectedImages = [];
 
 const MAX_IMAGES = 4;
+
+/* ========== 检索模式切换 ========== */
+
+/**
+ * 当前检索模式：agent=Agent 自主检索，pure=固定流水线直出，auto=后端规则自动选择。
+ */
+let chatMode = 'agent';
+const MODE_LABELS = { auto: 'Auto', agent: 'Agent', pure: 'Pure' };
+
+const modeDropdown = document.getElementById('modeDropdown');
+const modeBtn = document.getElementById('modeBtn');
+const modeLabel = document.getElementById('modeLabel');
+
+/**
+ * 初始化检索模式下拉交互：选择模式、点击外部自动收起
+ */
+function initModeDropdown() {
+  modeBtn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    modeDropdown.classList.toggle('open');
+  });
+
+  modeDropdown.querySelectorAll('.quick-item').forEach(function(item) {
+    item.addEventListener('click', function() {
+      if (item.classList.contains('disabled')) return;
+      chatMode = item.dataset.mode;
+      modeLabel.textContent = MODE_LABELS[chatMode];
+      modeDropdown.querySelectorAll('.quick-item').forEach(function(i) {
+        i.classList.toggle('active', i === item);
+      });
+      modeDropdown.classList.remove('open');
+    });
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!modeDropdown.contains(e.target)) {
+      modeDropdown.classList.remove('open');
+    }
+  });
+}
+
+/* ========== 认证与令牌管理 ========== */
+
+/**
+ * 读取本地存储的 JWT 访问令牌
+ * @returns {string} 令牌字符串，未登录时为空串
+ */
+function getToken() {
+  return localStorage.getItem('token') || '';
+}
+
+/**
+ * 组装带 Authorization 头的请求头
+ * @param {Object} extra - 额外的请求头字段
+ * @returns {Object} 合并后的请求头对象
+ */
+function authHeaders(extra) {
+  return Object.assign({ 'Authorization': 'Bearer ' + getToken() }, extra || {});
+}
+
+/**
+ * 显示登录遮罩层
+ * @param {string} message - 可选的提示信息（如"登录已过期"）
+ */
+function showLogin(message) {
+  loginError.textContent = message || '';
+  loginOverlay.classList.add('show');
+}
+
+/**
+ * 隐藏登录遮罩层
+ */
+function hideLogin() {
+  loginOverlay.classList.remove('show');
+}
+
+/**
+ * 更新侧边栏用户名与头像显示
+ * @param {string} username - 当前用户名
+ */
+function updateUserDisplay(username) {
+  document.getElementById('userName').textContent = username || '未登录';
+  document.getElementById('userAvatar').textContent = (username || 'U').charAt(0).toUpperCase();
+}
+
+/**
+ * 退出登录：清除本地令牌并回到登录页
+ */
+function logout() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('username');
+  sessionIdInput.value = '';
+  updateUserDisplay('');
+  showLogin();
+}
+
+/**
+ * 处理登录表单提交：请求 /auth/login 签发令牌
+ */
+async function handleLogin(event) {
+  event.preventDefault();
+  const username = document.getElementById('loginUsername').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if (!username || !password) {
+    loginError.textContent = '请输入用户名和密码';
+    return;
+  }
+  try {
+    const resp = await fetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: username, password: password })
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      localStorage.setItem('token', data.access_token);
+      localStorage.setItem('username', data.username);
+      updateUserDisplay(data.username);
+      hideLogin();
+      await createNewSession();
+    } else {
+      loginError.textContent = '用户名或密码错误';
+    }
+  } catch (e) {
+    loginError.textContent = '网络请求失败，请检查服务是否正常运行';
+  }
+}
+
+/**
+ * 页面加载时校验本地令牌：有效则恢复登录态并申请会话，401 则回到登录页
+ */
+async function verifyLogin() {
+  if (!getToken()) {
+    showLogin();
+    return;
+  }
+  try {
+    const resp = await fetch('/auth/me', { headers: authHeaders() });
+    if (resp.ok) {
+      const data = await resp.json();
+      updateUserDisplay(data.username);
+      if (!getSessionId()) {
+        await createNewSession();
+      }
+    } else {
+      logout();
+    }
+  } catch (e) {
+    // 网络异常时不强制登出，保留本地令牌待网络恢复后重试
+  }
+}
+
+/**
+ * 向服务端申请新会话并写入顶栏会话输入框
+ */
+async function createNewSession() {
+  try {
+    const resp = await fetch('/sessions', { method: 'POST', headers: authHeaders() });
+    if (resp.status === 401) {
+      showLogin('登录已过期，请重新登录');
+      return;
+    }
+    if (resp.ok) {
+      const data = await resp.json();
+      sessionIdInput.value = data.session_id;
+    }
+  } catch (e) {
+    showToast('创建会话失败，请检查服务是否正常运行');
+  }
+}
 
 /* ========== 推荐问题列表 ========== */
 const suggestionList = [
@@ -76,11 +250,11 @@ function escapeHtml(text) {
 }
 
 /**
- * 获取当前会话 ID
- * @returns {string} 会话 ID，未填写时返回 default
+ * 获取当前会话 ID（由服务端创建，输入框只读展示）
+ * @returns {string} 会话 ID，未创建时返回空串
  */
 function getSessionId() {
-  return document.getElementById('sessionId').value.trim() || 'default';
+  return sessionIdInput.value.trim();
 }
 
 /**
@@ -205,14 +379,31 @@ async function sendMessage() {
   try {
     const resp = await fetch('/chat/stream', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         question: question,
         session_id: getSessionId(),
-        images: sentImages
+        images: sentImages,
+        mode: chatMode
       }),
       signal: abortController.signal
     });
+
+    if (resp.status === 401) {
+      bubble.innerHTML = escapeHtml('登录已过期，请重新登录');
+      bubble.classList.remove('streaming');
+      bubble.style.color = '#e74c3c';
+      thinkingSection.style.display = 'none';
+      showLogin('登录已过期，请重新登录');
+      return;
+    }
+    if (resp.status === 403) {
+      bubble.innerHTML = escapeHtml('会话不存在或无权访问，请点击新对话创建会话');
+      bubble.classList.remove('streaming');
+      bubble.style.color = '#e74c3c';
+      thinkingSection.style.display = 'none';
+      return;
+    }
 
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
@@ -328,9 +519,9 @@ function stopGeneration() {
 /* ========== 新对话 ========== */
 
 /**
- * 清空聊天记录，恢复欢迎页面与推荐问题卡片
+ * 清空聊天记录，恢复欢迎页面并向服务端申请新会话
  */
-function newChat() {
+async function newChat() {
   if (isStreaming) {
     stopGeneration();
   }
@@ -344,6 +535,9 @@ function newChat() {
   chatContainer.appendChild(welcomeDiv);
   renderSuggestions();
   clearImagePreviews();
+  if (getToken()) {
+    await createNewSession();
+  }
   userInput.focus();
 }
 
@@ -446,7 +640,11 @@ imageInput.addEventListener('change', function() {
 });
 
 document.getElementById('newChatBtn').addEventListener('click', newChat);
+loginForm.addEventListener('submit', handleLogin);
+document.getElementById('logoutBtn').addEventListener('click', logout);
 
 /* ========== 初始化 ========== */
 renderSuggestions();
+initModeDropdown();
+verifyLogin();
 userInput.focus();
