@@ -23,7 +23,10 @@ def _media_url(file_path: str) -> str:
 
 
 def _format_retrieved_doc(doc: Document) -> str:
-    """拼接检索片段文本；图片片段额外附带图片标记与 Markdown 引用。"""
+    """拼接检索片段文本；图片片段额外附带图片标记与 Markdown 引用。
+
+    Agent 与 Pure 两模式共用本函数，保证上下文口径一致。
+    """
     part = doc.page_content
     if doc.metadata.get("is_image"):
         file_path = doc.metadata.get("file_path", "")
@@ -97,8 +100,16 @@ def get_rag_tools(retriever: BaseRetriever, retrieval_config: dict, reranker=Non
     def knowledge_base_search(query: str) -> str:
         """
         在私有知识库中检索预先入库的技术文档与规范资料。
-        触发规则：用户询问存档文档、业务规范相关内容时调用。
+        触发规则：用户询问存档文档、业务规范、部署配置、故障排除等内容时调用。
+        触发示例：
+          - 用户问"销售返点政策是什么" -> 检索知识库
+          - 用户问"config.yaml 怎么改" -> 检索知识库
+        不触发示例：
+          - 用户问"你好"、"谢谢" 等打招呼/闲聊 -> 不调用，直接回答
+          - 用户要求统计文本字数 -> 不调用本工具（改用 count_text_characters）
+          - 用户直接粘贴实时运行日志、想要分析日志故障 -> 不调用本工具（改用 log_analysis）
         重要：用户粘贴实时运行日志、想要分析日志故障时，禁止调用本工具。
+        检索次数由系统熔断机制自动控制，自行判断是否需要继续检索。
         Args:
             query: 用户检索诉求
         """

@@ -104,6 +104,10 @@ def _build_pure_messages(state: AppState, user_content: Any, history_messages: L
 def _resolve_mode(req: ChatRequest) -> str:
     """解析本次请求最终使用的检索模式
 
+    Auto 模式经规则路由（core/mode_router.route_mode）判定：
+    明确的知识库简单问题→ Pure 直出；其余（闲聊/域外/工具/复杂/模糊）→ Agent 自由回答。
+    不依赖检索裁决：向量检索对任何 query 都返回 top-k，"是否非空"无法作为有无内容依据。
+
     Args:
         req: 对话请求体
 
